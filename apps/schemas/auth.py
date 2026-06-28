@@ -27,7 +27,15 @@ class LogoutRequest(BaseModel):
     refresh_token: str
 
 
+class GoogleLoginRequest(BaseModel):
+    id_token: str = Field(..., description="Google ID Token received from frontend sign-in")
+
+
 class UserInfo(BaseModel):
     user_id: str
     email: str
+    first_name: str | None = None
+    last_name: str | None = None
+    is_active: bool
     roles: list[str]
+

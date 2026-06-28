@@ -17,32 +17,39 @@ from jose import JWTError, jwt
 from apps.config import Settings
 
 
+import uuid
+
 def create_access_token(data: dict[str, Any], settings: Settings) -> str:
     """
     Create a signed JWT access token.
-
-    TODO: Add 'jti' (JWT ID) claim for token revocation support.
     """
     payload = data.copy()
     expire = datetime.now(timezone.utc) + timedelta(
         minutes=settings.access_token_expire_minutes
     )
-    payload.update({"exp": expire, "type": "access"})
+    payload.update({
+        "exp": expire,
+        "type": "access",
+        "jti": str(uuid.uuid4()),
+    })
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 
 def create_refresh_token(data: dict[str, Any], settings: Settings) -> str:
     """
     Create a signed JWT refresh token with a longer TTL.
-
-    TODO: Store refresh token hash in Redis for revocation support.
     """
     payload = data.copy()
     expire = datetime.now(timezone.utc) + timedelta(
         days=settings.refresh_token_expire_days
     )
-    payload.update({"exp": expire, "type": "refresh"})
+    payload.update({
+        "exp": expire,
+        "type": "refresh",
+        "jti": str(uuid.uuid4()),
+    })
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
+
 
 
 def decode_access_token(token: str, settings: Settings) -> dict[str, Any] | None:

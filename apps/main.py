@@ -27,6 +27,9 @@ logger = structlog.get_logger(__name__)
 settings = get_settings()
 
 
+from infrastructure.database import init_db, engine
+from infrastructure.redis_client import get_redis_client, close_redis
+
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
@@ -37,15 +40,28 @@ async def lifespan(app: FastAPI):
         version=settings.app_version,
         env=settings.app_env,
     )
-    # TODO: initialise DB connection pool (infrastructure/database.py)
-    # TODO: initialise Redis connection (infrastructure/redis_client.py)
-    # TODO: initialise Qdrant client (infrastructure/qdrant_client.py)
-    # TODO: initialise MinIO client (infrastructure/minio_client.py)
-    # TODO: initialise Langfuse tracing (observability/tracing.py)
+    # Initialise DB tables (Development only auto-creates tables)
+    if settings.app_env == "development":
+        logger.info("Initializing database tables for development")
+        try:
+            await init_db()
+        except Exception as e:
+            logger.error("Failed to initialize database tables", error=str(e))
+
+    # Initialise Redis connection
+    try:
+        await get_redis_client()
+    except Exception as e:
+        logger.error("Failed to initialize Redis connection", error=str(e))
+        
     yield
     logger.info("Helix Finance AI shutting down")
-    # TODO: close DB connection pool
-    # TODO: close Redis connection
+    # Close Redis connection
+    await close_redis()
+    # Close DB connection pool
+    await engine.dispose()
+    logger.info("Database connection pool disposed")
+
 
 
 # ── App factory ───────────────────────────────────────────────────────────────

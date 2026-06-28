@@ -66,5 +66,9 @@ async def init_db() -> None:
 
     TODO: In production, use Alembic migrations instead.
     """
+    # Import models here to register them on Base.metadata before creation
+    from apps.models.user import User  # noqa: F401
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
