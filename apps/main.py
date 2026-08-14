@@ -29,6 +29,7 @@ settings = get_settings()
 
 from infrastructure.database import init_db, engine
 from infrastructure.redis_client import get_redis_client, close_redis
+from infrastructure.minio_client import ensure_bucket_exists
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
@@ -47,6 +48,12 @@ async def lifespan(app: FastAPI):
             await init_db()
         except Exception as e:
             logger.error("Failed to initialize database tables", error=str(e))
+
+    # Initialise MinIO Bucket
+    try:
+        await ensure_bucket_exists()
+    except Exception as e:
+        logger.error("Failed to initialize MinIO bucket", error=str(e))
 
     # Initialise Redis connection
     try:
@@ -112,6 +119,21 @@ def create_app() -> FastAPI:
                 "status": "not_implemented",
             },
         )
+
+    # ── UI Endpoints ──────────────────────────────────────────────────────
+    from fastapi.staticfiles import StaticFiles
+    import os
+
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    frontend_dir = os.path.join(root_dir, "frontend")
+    
+    if os.path.exists(frontend_dir):
+        app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+    else:
+        from fastapi.responses import HTMLResponse
+        @app.get("/", include_in_schema=False)
+        async def fallback_ui():
+            return HTMLResponse(content="<h1>Test UI frontend folder not found.</h1>", status_code=404)
 
     return app
 

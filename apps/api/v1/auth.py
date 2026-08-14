@@ -11,8 +11,7 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.config import SettingsDep
-from apps.dependencies import CurrentUserDep, get_db, get_redis
+from apps.dependencies import CurrentUserDep, get_db, get_redis, SettingsDep
 from apps.models.user import User
 from apps.schemas.auth import (
     GoogleLoginRequest,

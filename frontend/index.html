@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Helix Finance AI - Portal</title>
+    <!-- Premium Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <!-- Background glow animations -->
+    <div class="glow-bg">
+        <div class="glow-sphere sphere-1"></div>
+        <div class="glow-sphere sphere-2"></div>
+    </div>
+
+    <header class="app-header">
+        <div class="header-container">
+            <div class="logo">
+                <span class="logo-icon">🏦</span>
+                <div class="logo-text">
+                    <h1>Helix Finance</h1>
+                    <span class="logo-sub">AI Document Ingestion</span>
+                </div>
+            </div>
+            <div id="user-profile" class="user-profile hidden">
+                <div class="user-info">
+                    <span class="user-badge">PRO</span>
+                    <span id="user-email" class="user-email"></span>
+                </div>
+                <button class="btn btn-secondary btn-sm" onclick="logout()">
+                    <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                    Logout
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="app-container">
+        <!-- Auth Screen -->
+        <div id="auth-section" class="auth-card">
+            <div class="auth-header">
+                <h2>Welcome to Helix Finance</h2>
+                <p>Sign in to access your AI Document Pipeline</p>
+            </div>
+            
+            <div class="demo-credentials">
+                <div class="demo-header">
+                    <span class="demo-dot"></span>
+                    <span>Developer Demo Credentials</span>
+                </div>
+                <div class="demo-body">
+                    <div><span>Email:</span> <code>admin@helix.ai</code></div>
+                    <div><span>Password:</span> <code>admin123</code></div>
+                </div>
+            </div>
+
+            <form id="login-form" onsubmit="login(event)">
+                <div class="form-group">
+                    <label for="email">Work Email</label>
+                    <div class="input-wrapper">
+                        <svg class="input-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.206"></path></svg>
+                        <input type="email" id="email" required placeholder="name@company.com" value="admin@helix.ai">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <div class="input-wrapper">
+                        <svg class="input-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                        <input type="password" id="password" required placeholder="••••••••" value="admin123">
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">
+                    Sign In
+                    <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                </button>
+            </form>
+        </div>
+
+        <!-- Main Dashboard Screen -->
+        <div id="main-section" class="dashboard-grid hidden">
+            <!-- Left panel: Ingestion Controls -->
+            <div class="dashboard-sidebar">
+                <div class="glass-card">
+                    <h3 class="panel-title">Upload Documents</h3>
+                    <p class="panel-desc">Add financial docs, reports, or data files to run LangGraph compliance & AML analysis.</p>
+                    
+                    <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+                        <div class="drop-zone-content">
+                            <div class="drop-icon-wrapper">
+                                <svg class="drop-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                            </div>
+                            <div class="drop-text-content">
+                                <span class="drop-title">Drag & drop files here</span>
+                                <span class="drop-subtitle">or click to browse files</span>
+                            </div>
+                            <span class="drop-limitation">Supports PDF, DOCX, TXT up to 25MB</span>
+                        </div>
+                        <input type="file" id="file-input" class="hidden" accept=".pdf,.docx,.txt" onchange="handleFileSelect(event)">
+                    </div>
+
+                    <div id="upload-status" class="upload-status"></div>
+                </div>
+            </div>
+
+            <!-- Right panel: Document Ingestion Pipeline -->
+            <div class="dashboard-content">
+                <div class="glass-card">
+                    <div class="panel-header">
+                        <div>
+                            <h3 class="panel-title">Document Pipeline</h3>
+                            <p class="panel-desc">Real-time status of documents processing through LangGraph agents</p>
+                        </div>
+                        <button class="btn btn-secondary btn-icon-only" onclick="loadDocuments()" title="Refresh Pipeline">
+                            <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.253 8H18"></path></svg>
+                        </button>
+                    </div>
+
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Filename</th>
+                                    <th>Size</th>
+                                    <th>Status</th>
+                                    <th>Chunks</th>
+                                    <th>Task ID</th>
+                                    <th class="text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="documents-tbody">
+                                <tr>
+                                    <td colspan="6" class="table-empty">
+                                        <div class="empty-state">
+                                            <svg class="empty-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path></svg>
+                                            <p>No documents in ingestion pipeline</p>
+                                            <span>Upload a file on the left to start analysis</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="app-footer">
+        <p>&copy; 2026 Helix Finance AI. Enterprise-grade compliance auditing and multi-agent RAG pipeline.</p>
+    </footer>
+
+    <script src="/app.js"></script>
+</body>
+</html>

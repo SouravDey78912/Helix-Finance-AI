@@ -68,7 +68,26 @@ async def init_db() -> None:
     """
     # Import models here to register them on Base.metadata before creation
     from apps.models.user import User  # noqa: F401
+    from apps.models.document import Document  # noqa: F401
+    from security.password import hash_password
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Seed default user for testing
+    from sqlalchemy import select
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(User).where(User.email == "admin@helix.ai"))
+        existing_user = result.scalar_one_or_none()
+        if not existing_user:
+            admin_user = User(
+                email="admin@helix.ai",
+                hashed_password=hash_password("admin123"),
+                first_name="Admin",
+                last_name="User",
+                is_active=True,
+                roles=["admin", "user"]
+            )
+            session.add(admin_user)
+            await session.commit()
 

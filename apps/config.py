@@ -95,7 +95,7 @@ class Settings(BaseSettings):
     langfuse_host: str = "http://localhost:3000"
 
     # ── Prometheus ────────────────────────────────────────────────────────
-    prometheus_enabled: bool = True
+    prometheus_enabled: bool = False
     metrics_path: str = "/metrics"
 
 

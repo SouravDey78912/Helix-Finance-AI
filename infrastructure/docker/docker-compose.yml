@@ -137,7 +137,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./infrastructure/docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     networks:
       - helix_net
