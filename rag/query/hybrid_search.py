@@ -18,6 +18,7 @@ import litellm
 import structlog
 from apps.config import get_settings
 from infrastructure.qdrant_client import search_vectors
+from rag.ingest.embedder import generate_embeddings
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -38,32 +39,7 @@ async def hybrid_search(
     logger.info("hybrid_search started", query_count=len(queries), top_k=top_k)
 
     # 1. Embed all query variants
-    query_embeddings = []
-    for query in queries:
-        try:
-            kwargs = {
-                "model": settings.embedding_model,
-                "input": [query],
-            }
-            if settings.embedding_model.startswith("huggingface/"):
-                if settings.hf_token:
-                    kwargs["api_key"] = settings.hf_token
-            elif settings.embedding_model.startswith("ollama/"):
-                if settings.litellm_base_url:
-                    kwargs["api_base"] = settings.litellm_base_url
-            else:
-                if settings.litellm_base_url:
-                    kwargs["api_base"] = settings.litellm_base_url
-                if settings.openai_api_key:
-                    kwargs["api_key"] = settings.openai_api_key
-
-            response = await litellm.aembedd-ing(**kwargs)
-
-            query_embeddings.append(response.data[0]["embedding"])
-        except Exception as e:
-            logger.error("Failed to embed query in search", query=query, error=str(e))
-            # Continue with other queries if possible
-            continue
+    query_embeddings = await generate_embeddings(queries)
 
     if not query_embeddings:
         logger.warning("No successful query embeddings generated, returning empty search results.")

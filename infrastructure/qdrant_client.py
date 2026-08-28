@@ -85,39 +85,145 @@ async def search_vectors(
     filter_conditions: dict | None = None,
 ) -> list[dict]:
     """
-    Search for similar vectors in Qdrant.
-    """
-    client = await get_qdrant_client()
-    
-    # Construct filters if provided
-    qdrant_filter = None
-    if filter_conditions:
-        must_conditions = []
-        for key, val in filter_conditions.items():
-            if val is not None:
-                must_conditions.append(
-                    FieldCondition(
-                        key=key,
-                        match=MatchValue(value=val),
-                    )
-                )
-        if must_conditions:
-            qdrant_filter = Filter(must=must_conditions)
+    Search Qdrant for chunks similar to the supplied query vector.
 
-    results = await client.search(
-        collection_name=settings.qdrant_collection,
-        query_vector=query_vector,
-        limit=top_k,
-        query_filter=qdrant_filter,
+    The query vector must be generated using the same embedding model
+    and embedding dimension that were used during document ingestion.
+
+    Args:
+        query_vector:
+            Dense embedding vector generated from the user's query.
+
+        top_k:
+            Maximum number of similar chunks to retrieve.
+
+        filter_conditions:
+            Optional metadata filters to apply to the Qdrant search.
+
+    Returns:
+        List of matching chunks containing:
+            - chunk_id
+            - score
+            - text
+            - metadata
+    """
+
+    logger.info(
+        "Qdrant vector search started",
+        collection=settings.qdrant_collection,
+        top_k=top_k,
+        vector_dimension=len(query_vector),
     )
 
-    return [
-        {
-            "chunk_id": str(hit.id),
-            "score": hit.score,
-            "text": hit.payload.get("text", "") if hit.payload else "",
-            "metadata": hit.payload or {},
-        }
-        for hit in results
-    ]
+    if not query_vector:
+        logger.warning("Empty query vector supplied to Qdrant")
+        return []
+
+    # all-MiniLM-L6-v2 produces 384-dimensional embeddings.
+    expected_dimension = settings.embedding_dimension
+
+    if len(query_vector) != expected_dimension:
+        raise ValueError(
+            f"Invalid query vector dimension: "
+            f"expected={expected_dimension}, "
+            f"received={len(query_vector)}"
+        )
+
+    client = await get_qdrant_client()
+
+    # ------------------------------------------------------------------
+    # Construct Qdrant metadata filter.
+    #
+    # Example:
+    #     {
+    #         "document_id": "abc",
+    #         "user_id": "xyz"
+    #     }
+    #
+    # becomes:
+    #
+    #     Filter(
+    #         must=[
+    #             FieldCondition(...),
+    #             FieldCondition(...)
+    #         ]
+    #     )
+    # ------------------------------------------------------------------
+
+    qdrant_filter = None
+
+    if filter_conditions:
+        must_conditions = []
+
+        for key, value in filter_conditions.items():
+            if value is None:
+                continue
+
+            must_conditions.append(
+                FieldCondition(
+                    key=key,
+                    match=MatchValue(value=value),
+                )
+            )
+
+        if must_conditions:
+            qdrant_filter = Filter(
+                must=must_conditions
+            )
+
+    # ------------------------------------------------------------------
+    # Query Qdrant.
+    #
+    # query_points() is the current Qdrant client API.
+    #
+    # with_payload=True is required because we need the stored chunk
+    # text and metadata for the RAG context.
+    #
+    # with_vectors=False avoids returning the potentially large vectors
+    # since we don't need them after similarity search.
+    # ------------------------------------------------------------------
+
+    try:
+        response = await client.query_points(
+            collection_name=settings.qdrant_collection,
+            query=query_vector,
+            limit=top_k,
+            query_filter=qdrant_filter,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+    except Exception:
+        logger.exception(
+            "Qdrant vector search failed",
+            collection=settings.qdrant_collection,
+            top_k=top_k,
+        )
+        raise
+
+    # ------------------------------------------------------------------
+    # Convert Qdrant ScoredPoint objects into application-level dicts.
+    # ------------------------------------------------------------------
+
+    results = []
+
+    for hit in response.points:
+        payload = hit.payload or {}
+
+        results.append(
+            {
+                "chunk_id": str(hit.id),
+                "score": float(hit.score),
+                "text": payload.get("text", ""),
+                "metadata": payload,
+            }
+        )
+
+    logger.info(
+        "Qdrant vector search completed",
+        collection=settings.qdrant_collection,
+        result_count=len(results),
+    )
+
+    return results
 
