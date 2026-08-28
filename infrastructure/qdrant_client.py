@@ -41,8 +41,7 @@ async def get_qdrant_client() -> AsyncQdrantClient:
 async def ensure_collection_exists(client: AsyncQdrantClient) -> None:
     """
     Create the Qdrant collection if it does not exist.
-
-    TODO: Call this from the app lifespan startup hook.
+    Called automatically before every upsert operation.
     """
     collections = await client.get_collections()
     existing = [c.name for c in collections.collections]
@@ -59,8 +58,10 @@ async def ensure_collection_exists(client: AsyncQdrantClient) -> None:
 async def upsert_embeddings(embeddings: list[dict]) -> None:
     """
     Upsert a batch of embeddings into Qdrant.
+    Auto-creates the collection if it does not exist yet.
     """
     client = await get_qdrant_client()
+    await ensure_collection_exists(client)
     points = []
     for item in embeddings:
         points.append(

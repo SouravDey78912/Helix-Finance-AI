@@ -86,8 +86,9 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
 
     # ── Embeddings ────────────────────────────────────────────────────────
-    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    embedding_model: str = "huggingface/BAAI/bge-small-en-v1.5"
     embedding_dimension: int = 384
+    hf_token: str = ""
 
     # ── Langfuse ──────────────────────────────────────────────────────────
     langfuse_secret_key: str = ""

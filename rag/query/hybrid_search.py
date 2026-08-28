@@ -45,12 +45,20 @@ async def hybrid_search(
                 "model": settings.embedding_model,
                 "input": [query],
             }
-            if settings.litellm_base_url:
-                kwargs["api_base"] = settings.litellm_base_url
-            if settings.openai_api_key:
-                kwargs["api_key"] = settings.openai_api_key
+            if settings.embedding_model.startswith("huggingface/"):
+                if settings.hf_token:
+                    kwargs["api_key"] = settings.hf_token
+            elif settings.embedding_model.startswith("ollama/"):
+                if settings.litellm_base_url:
+                    kwargs["api_base"] = settings.litellm_base_url
+            else:
+                if settings.litellm_base_url:
+                    kwargs["api_base"] = settings.litellm_base_url
+                if settings.openai_api_key:
+                    kwargs["api_key"] = settings.openai_api_key
 
-            response = await litellm.aembedding(**kwargs)
+            response = await litellm.aembedd-ing(**kwargs)
+
             query_embeddings.append(response.data[0]["embedding"])
         except Exception as e:
             logger.error("Failed to embed query in search", query=query, error=str(e))

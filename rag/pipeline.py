@@ -85,6 +85,8 @@ class RAGPipeline:
               - sources: list[dict]
               - chunks: list[dict] (reranked candidate chunks)
         """
+
+
         logger.info("RAG query pipeline started", query=query_text, top_k=top_k)
         
         # 1. Rewrite Query
