@@ -12,49 +12,114 @@ Query Pipeline (from 01_System_Architecture.md):
 
 import structlog
 
+from rag.ingest.parser import parse_document
+from rag.ingest.cleaner import clean_text
+from rag.ingest.metadata_extractor import extract_metadata
+from rag.ingest.chunker import chunk_text
+from rag.ingest.embedder import embed_chunks
+from infrastructure.qdrant_client import upsert_embeddings
+from rag.query.rewriter import rewrite_query
+from rag.query.hybrid_search import hybrid_search
+from rag.query.reranker import rerank
+from rag.query.context_builder import build_context
+
 logger = structlog.get_logger(__name__)
 
 
 class RAGPipeline:
     """
     Orchestrates the full RAG pipeline.
-
-    TODO: Inject infrastructure clients (Qdrant, MinIO) via constructor.
-    TODO: Wire ingest and query sub-pipeline modules.
     """
 
     def __init__(self):
-        # TODO: inject QdrantClient, MinIOClient, EmbeddingModel
         pass
 
     async def ingest(self, file_path: str, document_id: str, metadata: dict) -> dict:
         """
         Run the full document ingestion pipeline.
-
-        Steps:
-        1. Parse  — rag/ingest/parser.py
-        2. Clean  — rag/ingest/cleaner.py
-        3. Metadata extraction — rag/ingest/metadata_extractor.py
-        4. Chunk  — rag/ingest/chunker.py
-        5. Embed  — rag/ingest/embedder.py
-        6. Store  — Qdrant via infrastructure/qdrant_client.py
-
-        TODO: Implement each step and wire them sequentially.
         """
-        logger.info("RAG ingest pipeline called", document_id=document_id)
-        raise NotImplementedError("RAG ingest pipeline not yet implemented")
+        logger.info("RAG ingest pipeline started", document_id=document_id, file_path=file_path)
+        
+        # 1. Parse
+        content_type = metadata.get("content_type", "text/plain")
+        raw_text = await parse_document(file_path, content_type)
+        
+        # 2. Clean
+        cleaned_text = await clean_text(raw_text)
+        
+        # 3. Metadata Extraction
+        extracted_meta = await extract_metadata(cleaned_text, metadata.get("filename", ""))
+        
+        # 4. Chunk
+        chunks = await chunk_text(cleaned_text, document_id)
+        
+        # Merge metadata into chunks
+        for chunk in chunks:
+            chunk.metadata.update(extracted_meta)
+            chunk.metadata["filename"] = metadata.get("filename", "")
+            chunk.metadata["document_id"] = document_id
+            
+        # 5. Embed
+        embedded_chunks = await embed_chunks(chunks)
+        
+        # 6. Store
+        await upsert_embeddings(embedded_chunks)
+        
+        logger.info("RAG ingest pipeline successfully completed", document_id=document_id, chunk_count=len(chunks))
+        
+        return {
+            "document_id": document_id,
+            "status": "indexed",
+            "chunk_count": len(chunks),
+            "metadata": extracted_meta,
+        }
 
-    async def query(self, query_text: str, top_k: int = 5) -> list[dict]:
+
+    async def query(self, query_text: str, top_k: int = 5, metadata_filter: dict | None = None) -> dict:
         """
         Run the full RAG query pipeline.
 
-        Steps:
-        1. Rewrite  — rag/query/rewriter.py
-        2. Hybrid Search — rag/query/hybrid_search.py
-        3. Rerank   — rag/query/reranker.py
-        4. Context  — rag/query/context_builder.py
-
-        TODO: Implement each step and wire them sequentially.
+        Returns:
+            dict containing:
+              - context_text: str
+              - sources: list[dict]
+              - chunks: list[dict] (reranked candidate chunks)
         """
-        logger.info("RAG query pipeline called", query=query_text)
-        raise NotImplementedError("RAG query pipeline not yet implemented")
+        logger.info("RAG query pipeline started", query=query_text, top_k=top_k)
+        
+        # 1. Rewrite Query
+        queries = await rewrite_query(query_text)
+        
+        # 2. Hybrid Search
+        from apps.config import get_settings
+        settings = get_settings()
+        collection = settings.qdrant_collection
+        
+        candidates = await hybrid_search(
+            queries=queries,
+            collection=collection,
+            top_k=top_k * 3,  # search wider first, then rerank
+            metadata_filter=metadata_filter,
+        )
+        
+        # 3. Rerank
+        reranked_chunks = await rerank(
+            query=query_text,
+            candidates=candidates,
+            top_n=top_k,
+        )
+        
+        # 4. Context Builder
+        context_result = await build_context(
+            query=query_text,
+            chunks=reranked_chunks,
+        )
+        
+        logger.info("RAG query pipeline completed successfully", chunk_count=len(reranked_chunks))
+        
+        return {
+            "context_text": context_result["context_text"],
+            "sources": context_result["sources"],
+            "chunks": reranked_chunks,
+        }
+

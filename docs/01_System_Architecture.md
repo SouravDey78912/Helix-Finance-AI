@@ -100,34 +100,48 @@ Every component must:
 
 ## RAG Pipeline
 
-### Ingest Pipeline
-```text
-Upload (POST /documents/upload)
-  │
-  ▼
-Store in MinIO  (infrastructure/minio_client.py)
-  │
-  ▼
-Queue Celery Task  (workers/tasks/ingest_task.py)
-  │
-  ├── Parse      (rag/ingest/parser.py)          PDF / DOCX / TXT → text
-  ├── Clean      (rag/ingest/cleaner.py)          Normalise text
-  ├── Metadata   (rag/ingest/metadata_extractor.py) Extract doc metadata
-  ├── Chunk      (rag/ingest/chunker.py)          Split into overlapping chunks
-  ├── Embed      (rag/ingest/embedder.py)          BAAI/bge-small-en-v1.5
-  └── Store      (infrastructure/qdrant_client.py) Upsert to Qdrant
-```
+### Ingest Sub-System
+The document ingestion pipeline processes incoming files asynchronously using Celery and MinIO.
 
-### Query Pipeline
-```text
-Query (POST /chat/query)
-  │
-  ├── Rewrite    (rag/query/rewriter.py)          HyDE + multi-query expansion
-  ├── Search     (rag/query/hybrid_search.py)      Dense + Sparse (RRF fusion)
-  ├── Rerank     (rag/query/reranker.py)           BAAI/bge-reranker-base
-  ├── Context    (rag/query/context_builder.py)    Assemble LLM prompt context
-  └── LLM        LiteLLM → Ollama/llama3 (local)
-```
+1. **Upload**: Files are POSTed to `/api/v1/documents/upload`.
+2. **Object Storage**: The raw file is stored in MinIO via `infrastructure/minio_client.py`.
+3. **Asynchronous Processing**: Celery task `workers/tasks/ingest_task.py` downloads the file and runs the pipeline stages:
+   * **Parse (`rag/ingest/parser.py`)**: 
+     - **PDF**: Handled via `pypdf.PdfReader` extracting text across all pages.
+     - **DOCX (Word)**: Lightweight XML parser that reads text blocks from `word/document.xml` using `zipfile`.
+     - **TXT/Markdown**: Decodes files with automatic fallback encodings (UTF-8, Latin-1, CP1252).
+   * **Clean (`rag/ingest/cleaner.py`)**: 
+     - Performs unicode normalization (NFKC).
+     - Standardizes and collapses spaces and tabs.
+     - Collapses consecutive newlines to double-newlines (`\n\n`) to retain paragraphs.
+   * **Metadata Extraction (`rag/ingest/metadata_extractor.py`)**: 
+     - Runs structured JSON schema extraction using LiteLLM to capture `doc_type`, `jurisdiction`, `effective_date`, `regulatory_body`, `topics`, and `language`.
+     - Automatically falls back to a regex/keyword-based heuristic parser if the LLM is down or fails.
+   * **Chunking (`rag/ingest/chunker.py`)**: 
+     - Splits text using `langchain_text_splitters.RecursiveCharacterTextSplitter` by checking newlines and spaces.
+     - Assigns a unique UUID to each chunk and injects the document metadata for Qdrant payload filters.
+   * **Embedding (`rag/ingest/embedder.py`)**: 
+     - Generates 384-dimensional dense vectors using LiteLLM's async `aembedding` endpoint.
+   * **Storage (`infrastructure/qdrant_client.py`)**: 
+     - Upserts vectors and metadata payloads using `PointStruct` batches into the Qdrant database.
+
+### Query & Retrieval Sub-System
+Retrieves context for natural language questions:
+
+1. **Query Rewrite (`rag/query/rewriter.py`)**:
+   - Uses LiteLLM to generate 3 alternative formulations/synonyms of the user's query to maximize retrieval recall. Falls back to original query on error.
+2. **Hybrid Search (`rag/query/hybrid_search.py`)**:
+   - Embeds each query variant concurrently.
+   - Executes parallel vector search in Qdrant with optional payload filter conditions.
+   - Combines results across variants using **Reciprocal Rank Fusion (RRF)** with standard constant $k=60$.
+3. **Reranking (`rag/query/reranker.py`)**:
+   - Re-evaluates top-K candidates using `sentence-transformers` CrossEncoder (`BAAI/bge-reranker-base`) for high semantic precision.
+   - Safely falls back to vector/RRF search scores if the local CrossEncoder model is unavailable.
+4. **Context Building (`rag/query/context_builder.py`)**:
+   - Aggregates the top reranked chunks.
+   - Computes tokens using `tiktoken` (falling back to character estimation if not present) to respect a strict context window token budget (default 3000).
+   - Generates structured citations showing file references and chunk indices.
+
 
 ---
 

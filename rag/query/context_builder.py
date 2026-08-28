@@ -34,9 +34,61 @@ async def build_context(
           - context_text: str (formatted context for the LLM)
           - sources: list[dict] (citations for the response)
           - token_count: int
-
-    TODO: Implement token counting and truncation.
-    TODO: Format citations in a structured way.
     """
     logger.info("build_context called", chunk_count=len(chunks))
-    raise NotImplementedError("Context builder not yet implemented")
+    
+    # 1. Format chunks and keep track of source files
+    sources = []
+    formatted_blocks = []
+    
+    # For token calculation fallback
+    total_estimated_tokens = 0
+    
+    # Try importing tiktoken for exact tokens, fallback to estimation
+    tokenizer = None
+    try:
+        import tiktoken
+        tokenizer = tiktoken.get_encoding("cl100k_base")
+    except ImportError:
+        pass
+
+    for i, chunk in enumerate(chunks, start=1):
+        text = chunk.get("text", "")
+        meta = chunk.get("metadata", {})
+        doc_id = meta.get("document_id", "unknown")
+        filename = meta.get("filename", "unknown")
+        chunk_idx = meta.get("chunk_index", 0)
+
+        # Block text
+        block = f"[Source {i}]: {filename} (Chunk {chunk_idx})\nContent:\n{text}\n"
+        
+        # Count tokens for this block
+        if tokenizer:
+            block_tokens = len(tokenizer.encode(block))
+        else:
+            # Heuristic estimation: ~4 chars per token
+            block_tokens = int(len(block) / 4)
+
+        if total_estimated_tokens + block_tokens > max_tokens:
+            logger.info("Context length exceeded token budget, stopping chunk inclusion", index=i)
+            break
+
+        formatted_blocks.append(block)
+        total_estimated_tokens += block_tokens
+
+        # Record citation
+        sources.append({
+            "citation_index": i,
+            "document_id": doc_id,
+            "filename": filename,
+            "chunk_index": chunk_idx,
+        })
+
+    context_text = "\n---\n".join(formatted_blocks)
+
+    return {
+        "context_text": context_text,
+        "sources": sources,
+        "token_count": total_estimated_tokens,
+    }
+

@@ -15,8 +15,10 @@ TODO: Implement using langchain_text_splitters.RecursiveCharacterTextSplitter.
 TODO: Add chunk metadata (chunk_index, doc_id, page_number).
 """
 
+import uuid
 import structlog
 from dataclasses import dataclass
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 logger = structlog.get_logger(__name__)
 
@@ -38,9 +40,34 @@ async def chunk_text(
 ) -> list[TextChunk]:
     """
     Split text into overlapping chunks.
-
-    TODO: Implement RecursiveCharacterTextSplitter with sentence boundary awareness.
-    TODO: Assign chunk_id as uuid and track chunk_index.
     """
     logger.info("chunk_text called", document_id=document_id, text_length=len(text))
-    raise NotImplementedError("Text chunker not yet implemented")
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        length_function=len,
+        separators=["\n\n", "\n", " ", ""],
+    )
+
+    raw_chunks = splitter.split_text(text)
+    
+    chunks = []
+    for index, raw_chunk in enumerate(raw_chunks):
+        chunk_id = str(uuid.uuid4())
+        chunks.append(
+            TextChunk(
+                chunk_id=chunk_id,
+                text=raw_chunk,
+                chunk_index=index,
+                document_id=document_id,
+                metadata={
+                    "chunk_index": index,
+                    "document_id": document_id,
+                },
+            )
+        )
+
+    logger.info("chunking complete", document_id=document_id, chunk_count=len(chunks))
+    return chunks
+

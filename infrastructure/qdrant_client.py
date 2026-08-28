@@ -14,7 +14,7 @@ TODO: Implement upsert, search, delete operations.
 """
 
 from qdrant_client import AsyncQdrantClient
-from qdrant_client.models import Distance, VectorParams
+from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
 import structlog
 
 from apps.config import get_settings
@@ -56,14 +56,26 @@ async def ensure_collection_exists(client: AsyncQdrantClient) -> None:
         )
         logger.info("Qdrant collection created", collection=settings.qdrant_collection)
 
-
 async def upsert_embeddings(embeddings: list[dict]) -> None:
     """
     Upsert a batch of embeddings into Qdrant.
-
-    TODO: Implement using client.upsert() with PointStruct.
     """
-    raise NotImplementedError("Qdrant upsert not yet implemented")
+    client = await get_qdrant_client()
+    points = []
+    for item in embeddings:
+        points.append(
+            PointStruct(
+                id=item["chunk_id"],
+                vector=item["embedding"],
+                payload=item["metadata"],
+            )
+        )
+    
+    await client.upsert(
+        collection_name=settings.qdrant_collection,
+        points=points,
+    )
+    logger.info("Upserted points to Qdrant", count=len(points), collection=settings.qdrant_collection)
 
 
 async def search_vectors(
@@ -73,7 +85,38 @@ async def search_vectors(
 ) -> list[dict]:
     """
     Search for similar vectors in Qdrant.
-
-    TODO: Implement using client.search() with optional filter.
     """
-    raise NotImplementedError("Qdrant search not yet implemented")
+    client = await get_qdrant_client()
+    
+    # Construct filters if provided
+    qdrant_filter = None
+    if filter_conditions:
+        must_conditions = []
+        for key, val in filter_conditions.items():
+            if val is not None:
+                must_conditions.append(
+                    FieldCondition(
+                        key=key,
+                        match=MatchValue(value=val),
+                    )
+                )
+        if must_conditions:
+            qdrant_filter = Filter(must=must_conditions)
+
+    results = await client.search(
+        collection_name=settings.qdrant_collection,
+        query_vector=query_vector,
+        limit=top_k,
+        query_filter=qdrant_filter,
+    )
+
+    return [
+        {
+            "chunk_id": str(hit.id),
+            "score": hit.score,
+            "text": hit.payload.get("text", "") if hit.payload else "",
+            "metadata": hit.payload or {},
+        }
+        for hit in results
+    ]
+

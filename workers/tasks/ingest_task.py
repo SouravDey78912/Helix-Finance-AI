@@ -79,19 +79,28 @@ def ingest_document(self: Task, document_id: str, object_name: str, metadata: di
             file_size = os.path.getsize(local_path)
             logger.info("File successfully downloaded", path=local_path, size_bytes=file_size)
 
-            # TODO: Integrate actual RAG pipeline:
-            # Parse (rag/ingest/parser.py) -> Clean -> Metadata -> Chunk -> Embed -> Store (Qdrant)
-            # Currently simulating with standard 5 chunks for verification
-            mock_chunk_count = 5
+            # 2. Run actual RAG pipeline:
+            # Parse -> Clean -> Metadata -> Chunk -> Embed -> Store (Qdrant)
+            from rag.pipeline import RAGPipeline
+            pipeline = RAGPipeline()
+            # Pass content_type in metadata if present
+            if "content_type" not in metadata:
+                # Fallback to model or generic
+                metadata["content_type"] = "application/octet-stream"
 
-        # 2. Update status to indexed
+            pipeline_result = loop.run_until_complete(
+                pipeline.ingest(local_path, document_id, metadata)
+            )
+            chunk_count = pipeline_result["chunk_count"]
+
+        # 3. Update status to indexed
         loop.run_until_complete(
-            update_document_status(document_id, "indexed", chunk_count=mock_chunk_count)
+            update_document_status(document_id, "indexed", chunk_count=chunk_count)
         )
         return {
             "document_id": document_id,
             "status": "indexed",
-            "chunk_count": mock_chunk_count,
+            "chunk_count": chunk_count,
         }
 
     except Exception as e:
