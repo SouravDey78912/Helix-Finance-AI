@@ -335,11 +335,20 @@ async function loadDocuments() {
             const sizeKB = (doc.size_bytes / 1024).toFixed(1) + ' KB';
             const chunks = doc.chunk_count !== null ? doc.chunk_count : '—';
             const taskId = doc.metadata && doc.metadata.object_name ? doc.metadata.object_name.split('.')[0] : '—';
+            
+            let statusMarkup = `<span class="badge badge-${doc.status}">${doc.status}</span>`;
+            if (doc.status === 'RETRYING' && doc.retry_count) {
+                statusMarkup += ` <span style="font-size:0.7rem;color:var(--color-warning);font-weight:600;">(Retry ${doc.retry_count}/3)</span>`;
+            }
+            if (doc.error_message) {
+                statusMarkup += `<br/><span style="font-size:0.7rem;color:var(--color-danger);" title="${escapeHtml(doc.error_message)}">⚠️ ${escapeHtml(doc.error_message.slice(0, 30))}${doc.error_message.length > 30 ? '...' : ''}</span>`;
+            }
+
             return `
                 <tr>
                     <td style="font-weight:600;color:var(--text-primary);">${escapeHtml(doc.filename)}</td>
                     <td style="color:var(--text-secondary);">${sizeKB}</td>
-                    <td><span class="badge badge-${doc.status}">${doc.status}</span></td>
+                    <td>${statusMarkup}</td>
                     <td class="font-mono" style="color:var(--text-secondary);">${chunks}</td>
                     <td class="font-mono" style="font-size:0.78rem;color:var(--text-muted);">${escapeHtml(taskId)}</td>
                     <td class="text-right">
@@ -348,9 +357,10 @@ async function loadDocuments() {
                 </tr>`;
         }).join('');
 
-        const hasActiveTasks = data.documents.some(d => d.status === 'pending' || d.status === 'processing');
+        const nonTerminalStates = ['UPLOADED', 'QUEUED', 'PROCESSING', 'PARSING', 'CHUNKING', 'EMBEDDING', 'INDEXING', 'RETRYING', 'pending', 'processing'];
+        const hasActiveTasks = data.documents.some(d => nonTerminalStates.includes(d.status));
         if (hasActiveTasks && currentTab === 'pipeline') {
-            if (!window.pollInterval) window.pollInterval = setInterval(loadDocuments, 3000);
+            if (!window.pollInterval) window.pollInterval = setInterval(loadDocuments, 2000);
         } else {
             if (window.pollInterval) { clearInterval(window.pollInterval); window.pollInterval = null; }
         }
@@ -468,8 +478,38 @@ async function sendMessage() {
         
         let metaExtra = '';
         if (data.sources && data.sources.length > 0) {
-            const sourcesList = data.sources.map(s => `<code>${escapeHtml(s.filename || s.doc_id || 'Doc')}</code>`).join(', ');
-            metaExtra = `<br><span style="font-size:0.75rem;color:var(--text-muted);margin-top:0.4rem;display:block;">Sources cited: ${sourcesList}</span>`;
+            const drawerId = `sources-drawer-${Date.now()}`;
+            
+            // Deduplicate sources by title and build source cards with text excerpts
+            const sourceCards = data.sources.map((s, idx) => {
+                const title = escapeHtml(s.title || s.metadata?.filename || `Document ${idx + 1}`);
+                const snippet = escapeHtml(s.chunk_text ? s.chunk_text.trim() : 'Document context match');
+                const relScore = s.score ? (s.score * 100).toFixed(0) + '% match' : '';
+                
+                return `
+                    <div class="source-card">
+                        <div class="source-card-header">
+                            <span class="source-filename">📄 ${title}</span>
+                            ${relScore ? `<span class="source-score-badge">${relScore}</span>` : ''}
+                        </div>
+                        <div class="source-excerpt">"${snippet}"</div>
+                    </div>`;
+            }).join('');
+
+            metaExtra = `
+                <div class="source-citation-container">
+                    <button class="source-info-btn" onclick="toggleSourceDrawer('${drawerId}')" title="Click to view full cited text passages">
+                        <span class="source-info-icon-badge">
+                            <svg viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
+                            </svg>
+                        </span>
+                        <span>📚 Cited Sources (${data.sources.length})</span>
+                    </button>
+                    <div id="${drawerId}" class="source-drawer hidden">
+                        ${sourceCards}
+                    </div>
+                </div>`;
         }
 
         appendMessage('assistant', replyText + metaExtra);
@@ -481,6 +521,14 @@ async function sendMessage() {
         isChatLoading = false;
         typingEl.classList.add('hidden');
         sendBtn.disabled = false;
+        scrollChatToBottom();
+    }
+}
+
+function toggleSourceDrawer(drawerId) {
+    const drawer = document.getElementById(drawerId);
+    if (drawer) {
+        drawer.classList.toggle('hidden');
         scrollChatToBottom();
     }
 }

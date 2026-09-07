@@ -697,8 +697,10 @@ body.enterprise-theme {
 .badge-blue { background: #eff6ff; color: var(--color-info); }
 .badge-amber { background: #fffbe6; color: var(--color-warning); }
 .badge-danger { background: #fef2f2; color: var(--color-danger); }
-.badge-completed, .badge-success { background: #ecfdf5; color: var(--color-success); }
-.badge-processing, .badge-pending { background: #fffbe6; color: var(--color-warning); }
+.badge-completed, .badge-success, .badge-COMPLETED, .badge-indexed { background: #ecfdf5; color: var(--color-success); border: 1px solid #a7f3d0; }
+.badge-processing, .badge-pending, .badge-UPLOADED, .badge-QUEUED, .badge-PROCESSING, .badge-PARSING, .badge-CHUNKING, .badge-EMBEDDING, .badge-INDEXING { background: #eff6ff; color: var(--color-info); border: 1px solid #bfdbfe; font-weight: 700; }
+.badge-RETRYING { background: #fffbe6; color: var(--color-warning); border: 1px solid #fde68a; font-weight: 700; }
+.badge-FAILED, .badge-failed { background: #fef2f2; color: var(--color-danger); border: 1px solid #fecaca; font-weight: 700; }
 
 .status-pill {
     font-size: 0.72rem;
@@ -1193,6 +1195,104 @@ body.enterprise-theme {
     font-size: 0.7rem;
     color: var(--text-muted);
     margin-top: 0.3rem;
+}
+
+/* Collapsible Source Citation Drawer */
+.source-citation-container {
+    margin-top: 0.75rem;
+    border-top: 1px dashed var(--border-color);
+    padding-top: 0.6rem;
+}
+
+.source-info-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    background: #ffffff;
+    border: 1px solid rgba(79, 70, 229, 0.25);
+    border-radius: 8px;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--color-primary);
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(79, 70, 229, 0.1);
+    transition: all 0.2s ease;
+}
+
+.source-info-btn:hover {
+    background: var(--primary-soft);
+    border-color: var(--color-primary);
+    transform: translateY(-1px);
+    box-shadow: 0 3px 8px rgba(79, 70, 229, 0.15);
+}
+
+.source-info-icon-badge {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--primary-soft);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-primary);
+    flex-shrink: 0;
+}
+
+.source-info-icon-badge svg {
+    width: 13px;
+    height: 13px;
+}
+
+.source-drawer {
+    margin-top: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.source-card {
+    background: #ffffff;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 0.6rem 0.85rem;
+    font-size: 0.76rem;
+}
+
+.source-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.3rem;
+}
+
+.source-filename {
+    font-weight: 700;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.source-score-badge {
+    font-size: 0.65rem;
+    background: var(--primary-soft);
+    color: var(--color-primary);
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+.source-excerpt {
+    color: var(--text-secondary);
+    font-style: italic;
+    background: #f8fafc;
+    border-left: 3px solid var(--color-primary);
+    padding: 0.4rem 0.65rem;
+    border-radius: 4px;
+    margin-top: 0.2rem;
+    line-height: 1.4;
+    white-space: pre-wrap;
 }
 
 /* Agent Trace */

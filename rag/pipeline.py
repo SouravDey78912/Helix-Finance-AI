@@ -34,13 +34,15 @@ class RAGPipeline:
     def __init__(self):
         pass
 
-    async def ingest(self, file_path: str, document_id: str, metadata: dict) -> dict:
+    async def ingest(self, file_path: str, document_id: str, metadata: dict, status_callback=None) -> dict:
         """
-        Run the full document ingestion pipeline.
+        Run the full document ingestion pipeline with optional granular stage status callbacks.
         """
         logger.info("RAG ingest pipeline started", document_id=document_id, file_path=file_path)
         
         # 1. Parse
+        if status_callback:
+            await status_callback("PARSING")
         content_type = metadata.get("content_type", "text/plain")
         raw_text = await parse_document(file_path, content_type)
         
@@ -51,6 +53,8 @@ class RAGPipeline:
         extracted_meta = await extract_metadata(cleaned_text, metadata.get("filename", ""))
         
         # 4. Chunk
+        if status_callback:
+            await status_callback("CHUNKING")
         chunks = await chunk_text(cleaned_text, document_id)
         
         # Merge metadata into chunks
@@ -60,16 +64,20 @@ class RAGPipeline:
             chunk.metadata["document_id"] = document_id
             
         # 5. Embed
+        if status_callback:
+            await status_callback("EMBEDDING", len(chunks))
         embedded_chunks = await embed_chunks(chunks)
         
-        # 6. Store
+        # 6. Store / Index
+        if status_callback:
+            await status_callback("INDEXING", len(chunks))
         await upsert_embeddings(embedded_chunks)
         
         logger.info("RAG ingest pipeline successfully completed", document_id=document_id, chunk_count=len(chunks))
         
         return {
             "document_id": document_id,
-            "status": "indexed",
+            "status": "COMPLETED",
             "chunk_count": len(chunks),
             "metadata": extracted_meta,
         }

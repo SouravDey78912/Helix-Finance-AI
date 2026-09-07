@@ -60,19 +60,24 @@ async def upload_document(
             detail=f"Failed to store file in MinIO: {str(e)}",
         )
 
-    # Save initial metadata to database with 'pending' status
+    # Save initial metadata to database with 'UPLOADED' status
     db_doc = Document(
         id=doc_id,
         filename=file.filename or "unknown",
         content_type=file.content_type or "application/octet-stream",
         size_bytes=file_size,
-        status="pending",
+        status="UPLOADED",
         metadata_dict={
             "object_name": object_name,
             "uploader_id": str(current_user.id),
         },
     )
     db.add(db_doc)
+    await db.commit()
+    await db.refresh(db_doc)
+
+    # Transition status to QUEUED upon handing over to Celery task queue
+    db_doc.status = "QUEUED"
     await db.commit()
     await db.refresh(db_doc)
 
@@ -90,9 +95,9 @@ async def upload_document(
     return DocumentUploadResponse(
         document_id=str(db_doc.id),
         filename=db_doc.filename,
-        status="pending",
+        status="QUEUED",
         task_id=task.id,
-        message="Document queued for processing",
+        message="Document uploaded and queued for ingestion",
     )
 
 
@@ -132,6 +137,9 @@ async def list_documents(
             status=d.status,
             uploaded_at=d.uploaded_at,
             indexed_at=d.indexed_at,
+            stage_updated_at=d.stage_updated_at,
+            retry_count=d.retry_count or 0,
+            error_message=d.error_message,
             chunk_count=d.chunk_count,
             metadata=d.metadata_dict,
         )
@@ -165,7 +173,7 @@ async def get_telemetry_summary(
         flagged_res = await db.execute(select(func.count(Document.id)).where(Document.status == "flagged"))
         flagged_count = flagged_res.scalar() or 0
 
-        completed_res = await db.execute(select(func.count(Document.id)).where(Document.status == "completed"))
+        completed_res = await db.execute(select(func.count(Document.id)).where(Document.status.in_(["COMPLETED", "indexed"])))
         completed_count = completed_res.scalar() or 0
 
         # Dynamic accuracy calculation
@@ -230,6 +238,9 @@ async def get_document(
         status=d.status,
         uploaded_at=d.uploaded_at,
         indexed_at=d.indexed_at,
+        stage_updated_at=d.stage_updated_at,
+        retry_count=d.retry_count or 0,
+        error_message=d.error_message,
         chunk_count=d.chunk_count,
         metadata=d.metadata_dict,
     )

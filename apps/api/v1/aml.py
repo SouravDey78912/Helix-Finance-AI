@@ -17,7 +17,8 @@ from fastapi import Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from apps.dependencies import get_db
-from apps.models.document import Document
+router = APIRouter()
+
 
 @router.get(
     "/alerts",
