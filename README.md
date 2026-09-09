@@ -79,10 +79,13 @@ helix-finance-ai/
 │   ├── guardrails.py   # Safety and compliance filters
 │   └── specialist/     # AML, KYC, Compliance specialist agents
 │
-├── rag/                # RAG pipeline
-│   ├── ingest/         # Parse → Clean → Metadata → Chunk → Embed → Qdrant
-│   └── query/          # Rewrite → Hybrid Search → Rerank → Context Builder
+├── rag/                # RAG pipeline & compliance intelligence engine
+│   ├── ingest/         # Parse → Clean → Metadata & Entity Extraction → Chunk → Embed → Qdrant
+│   ├── query/          # Rewrite → Hybrid Search (RRF) → Rerank → Context Builder
+│   ├── compliance_graph.py # Control Mapping & Compliance Gap Analysis Engine
+│   └── pipeline.py     # End-to-end RAG workflow execution
 │
+├── frontend/           # Modern Glassmorphism Web Interface & Command Center
 ├── security/           # JWT handler + bcrypt password hashing
 ├── evaluation/         # Ragas + DeepEval evaluation
 ├── observability/      # Prometheus metrics + Langfuse tracing
@@ -99,20 +102,21 @@ helix-finance-ai/
 | Method | Path | Description | Status |
 |--------|------|-------------|--------|
 | GET | `/api/v1/health` | Liveness probe | ✅ Implemented |
-| GET | `/api/v1/health/ready` | Readiness probe | 🔧 Stub |
-| POST | `/api/v1/auth/login` | User login | 🔧 Stub |
-| POST | `/api/v1/auth/refresh` | Refresh token | 🔧 Stub |
-| POST | `/api/v1/auth/logout` | Logout | 🔧 Stub |
-| GET | `/api/v1/auth/me` | Current user | 🔧 Stub |
-| POST | `/api/v1/chat/query` | RAG query | 🔧 Stub |
-| POST | `/api/v1/documents/upload` | Upload document | 🔧 Stub |
-| GET | `/api/v1/documents` | List documents | 🔧 Stub |
-| GET | `/api/v1/documents/{id}` | Get document | 🔧 Stub |
-| DELETE | `/api/v1/documents/{id}` | Delete document | 🔧 Stub |
-| POST | `/api/v1/aml/analyze` | AML analysis | 🔧 Stub |
-| POST | `/api/v1/kyc/verify` | KYC verification | 🔧 Stub |
-| POST | `/api/v1/compliance/check` | Compliance check | 🔧 Stub |
+| GET | `/api/v1/health/ready` | Readiness probe | ✅ Implemented |
+| POST | `/api/v1/auth/login` | User login | ✅ Implemented |
+| POST | `/api/v1/auth/refresh` | Refresh token | ✅ Implemented |
+| POST | `/api/v1/auth/logout` | Logout | ✅ Implemented |
+| GET | `/api/v1/auth/me` | Current user | ✅ Implemented |
+| POST | `/api/v1/chat/query` | Hybrid RAG query & Compliance Analysis | ✅ Implemented |
+| POST | `/api/v1/documents/upload` | Upload & ingest document | ✅ Implemented |
+| GET | `/api/v1/documents` | List uploaded documents | ✅ Implemented |
+| GET | `/api/v1/documents/{id}` | Get document details | ✅ Implemented |
+| DELETE | `/api/v1/documents/{id}` | Delete document | ✅ Implemented |
+| POST | `/api/v1/aml/analyze` | AML Risk Radar | 🔍 PREVIEW (Planned) |
+| POST | `/api/v1/kyc/verify` | KYC Verification | 🔍 PREVIEW (Planned) |
+| POST | `/api/v1/compliance/check` | Compliance Audit Ledger | 🔍 PREVIEW (Planned) |
 | GET | `/metrics` | Prometheus metrics | ✅ Implemented |
+
 
 ---
 
