@@ -11,16 +11,22 @@ from pydantic import BaseModel, Field
 
 
 class DocumentStatus(str, Enum):
-    PENDING = "pending"
-    PROCESSING = "processing"
-    INDEXED = "indexed"
-    FAILED = "failed"
+    UPLOADED = "UPLOADED"
+    QUEUED = "QUEUED"
+    PROCESSING = "PROCESSING"
+    PARSING = "PARSING"
+    CHUNKING = "CHUNKING"
+    EMBEDDING = "EMBEDDING"
+    INDEXING = "INDEXING"
+    COMPLETED = "COMPLETED"
+    RETRYING = "RETRYING"
+    FAILED = "FAILED"
 
 
 class DocumentUploadResponse(BaseModel):
     document_id: str
     filename: str
-    status: DocumentStatus = DocumentStatus.PENDING
+    status: DocumentStatus = DocumentStatus.UPLOADED
     task_id: str = Field(..., description="Celery task ID for async ingestion")
     message: str = "Document queued for processing"
 
@@ -30,9 +36,12 @@ class DocumentRecord(BaseModel):
     filename: str
     content_type: str
     size_bytes: int
-    status: DocumentStatus
+    status: str
     uploaded_at: datetime
     indexed_at: datetime | None = None
+    stage_updated_at: datetime | None = None
+    retry_count: int = 0
+    error_message: str | None = None
     chunk_count: int | None = None
     metadata: dict = {}
 

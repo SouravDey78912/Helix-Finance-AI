@@ -7,16 +7,21 @@ Production note: Same implementation works in production.
 Consider adding pepper (app-level secret) for defence-in-depth.
 """
 
-from passlib.context import CryptContext
-
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
+import bcrypt
 
 def hash_password(plain_password: str) -> str:
-    """Hash a plain-text password using bcrypt."""
-    return _pwd_context.hash(plain_password)
+    """Hash a plain-text password using bcrypt directly."""
+    pwd_bytes = plain_password.encode('utf-8')
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(pwd_bytes, salt)
+    return hashed.decode('utf-8')
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a plain-text password against a bcrypt hash."""
-    return _pwd_context.verify(plain_password, hashed_password)
+    """Verify a plain-text password against a bcrypt hash directly."""
+    try:
+        pwd_bytes = plain_password.encode('utf-8')
+        hashed_bytes = hashed_password.encode('utf-8')
+        return bcrypt.checkpw(pwd_bytes, hashed_bytes)
+    except Exception:
+        return False

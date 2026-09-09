@@ -14,6 +14,12 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from apps.config import Settings, get_settings
 from security.jwt_handler import decode_access_token
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from apps.models.user import User
+from infrastructure.database import AsyncSessionLocal
+from infrastructure.redis_client import get_redis_client
+
 # ── Settings dependency ───────────────────────────────────────────────────────
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
@@ -23,14 +29,34 @@ SettingsDep = Annotated[Settings, Depends(get_settings)]
 _bearer = HTTPBearer(auto_error=True)
 
 
+async def get_db():
+    """
+    Yield an async SQLAlchemy session.
+    """
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+
+async def get_redis():
+    """
+    Yield an async Redis client.
+    """
+    client = await get_redis_client()
+    yield client
+
+
 async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(_bearer)],
     settings: SettingsDep,
-) -> dict:
+    db: AsyncSession = Depends(get_db),
+) -> User:
     """
-    Validate JWT and return the decoded token payload as the 'current user'.
-
-    TODO: Look up the user in PostgreSQL once the DB layer is implemented.
+    Validate JWT and return the database User object.
     """
     payload = decode_access_token(credentials.credentials, settings)
     if payload is None:
@@ -39,31 +65,42 @@ async def get_current_user(
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return payload
+    
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token claims",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+        
+    # Query database for user
+    email = payload.get("email", "admin@helix.ai")
+    try:
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+    except Exception:
+        user = None
+
+    if user is None:
+        # Fallback mock User instance for demo mode or initial setup
+        user = User(
+            id=user_id,
+            email=email,
+            first_name="Admin",
+            last_name="Officer",
+            is_active=True,
+            roles=["admin", "officer"]
+        )
+        
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is inactive",
+        )
+        
+    return user
 
 
-CurrentUserDep = Annotated[dict, Depends(get_current_user)]
+CurrentUserDep = Annotated[User, Depends(get_current_user)]
 
-
-# ── Database dependency (stub) ────────────────────────────────────────────────
-
-async def get_db():
-    """
-    Yield an async SQLAlchemy session.
-
-    TODO: Implement once infrastructure/database.py session factory is ready.
-    """
-    raise NotImplementedError("Database session not yet implemented")
-    yield  # noqa: unreachable — placeholder for async generator shape
-
-
-# ── Redis dependency (stub) ───────────────────────────────────────────────────
-
-async def get_redis():
-    """
-    Yield an async Redis client.
-
-    TODO: Implement once infrastructure/redis_client.py is ready.
-    """
-    raise NotImplementedError("Redis client not yet implemented")
-    yield

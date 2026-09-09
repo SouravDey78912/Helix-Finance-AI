@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
+    google_client_id: str = ""
+    google_client_secret: str = ""
+
 
     # ── Rate Limiting ─────────────────────────────────────────────────────
     rate_limit_requests: int = 100
@@ -83,8 +86,9 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
 
     # ── Embeddings ────────────────────────────────────────────────────────
-    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    embedding_model: str = "huggingface/BAAI/bge-small-en-v1.5"
     embedding_dimension: int = 384
+    hf_token: str = ""
 
     # ── Langfuse ──────────────────────────────────────────────────────────
     langfuse_secret_key: str = ""
@@ -92,7 +96,7 @@ class Settings(BaseSettings):
     langfuse_host: str = "http://localhost:3000"
 
     # ── Prometheus ────────────────────────────────────────────────────────
-    prometheus_enabled: bool = True
+    prometheus_enabled: bool = False
     metrics_path: str = "/metrics"
 
 

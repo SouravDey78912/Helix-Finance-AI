@@ -38,11 +38,31 @@ Build with open source.
 - Cloud-portable
 - Beginner-friendly implementation
 
+## Core Capabilities & Features
+- **Hybrid RAG Pipeline**: Reciprocal Rank Fusion (RRF) query rewriting, dense vector search (Qdrant), and cross-encoder reranking.
+- **Structured Entity & Requirement Extraction**: Automatic domain entity parsing (`Regulation`, `Requirement`, `Internal Control`, `Evidence`) during document ingestion using `rag/ingest/entity_extractor.py`.
+- **Compliance Gap Analysis Engine**: Graph-based compliance relationship builder (`rag/compliance_graph.py`) identifying unmapped requirements and missing evidence with automated severity scoring (`HIGH`, `MEDIUM`, `LOW`).
+- **Interactive Compliance Command Center**: Modern glassmorphism UI with real-time gap analysis cards, document manager, live query execution, and explicit PREVIEW state tags for target benchmark metrics.
+
 ## Repository
 ```text
 apps/
 agents/
 rag/
+  ingest/
+    cleaner.py
+    chunker.py
+    embedder.py
+    entity_extractor.py
+    metadata_extractor.py
+    parser.py
+  query/
+    context_builder.py
+    hybrid_search.py
+    reranker.py
+    rewriter.py
+  compliance_graph.py
+  pipeline.py
 security/
 evaluation/
 observability/
@@ -50,3 +70,4 @@ infrastructure/
 docs/
 tests/
 ```
+

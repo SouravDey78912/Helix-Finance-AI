@@ -46,3 +46,7 @@ docker-compose.override.yml
 # ── Data / Uploads ────────────────────────────────────────────────────────────
 uploads/
 data/
+
+# ── Generated Documentation ───────────────────────────────────────────────────
+docs/02_Comprehensive_Platform_Documentation.md
+
