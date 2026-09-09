@@ -559,11 +559,58 @@ function appendMessage(sender, text) {
 
 function formatMessageContent(content) {
     if (!content) return '';
-    // Format code tags and line breaks
-    let formatted = content
-        .replace(/\n\n/g, '</p><p class="mt-2">')
+    
+    let text = content;
+
+    // Protect source drawer HTML snippet if attached
+    let drawerSnippet = '';
+    const drawerIdx = text.indexOf('<div class="source-citation-container">');
+    if (drawerIdx !== -1) {
+        drawerSnippet = text.substring(drawerIdx);
+        text = text.substring(0, drawerIdx);
+    }
+
+    // Pre-clean spaces around markdown asterisks
+    text = text.replace(/\*\s*\*/g, '**');
+
+    // Parse markdown headers
+    text = text.replace(/^#### (.*$)/gim, '<h4 class="gap-card-title">$1</h4>');
+    text = text.replace(/^### (.*$)/gim, '<h3 class="gap-header-title">$1</h3>');
+    text = text.replace(/^## (.*$)/gim, '<h2 class="gap-header-title">$1</h2>');
+
+    // Transform Markdown bold text
+    text = text.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-slate-800">$1</strong>');
+
+    // Convert Severity headings into UI Cards
+    text = text.replace(/<h4 class="gap-card-title">Severity:\s*(HIGH|MEDIUM|LOW)<\/h4>/gi, (match, severity) => {
+        const sev = severity.toUpperCase();
+        const badgeClass = sev === 'HIGH' ? 'gap-badge-high' : (sev === 'MEDIUM' ? 'gap-badge-medium' : 'gap-badge-low');
+        const icon = sev === 'HIGH' ? '🚨' : (sev === 'MEDIUM' ? '⚠️' : 'ℹ️');
+        return `</div><div class="compliance-gap-card ${badgeClass}">
+            <div class="gap-card-header">
+                <span class="gap-badge ${badgeClass}">${icon} ${sev} SEVERITY GAP</span>
+            </div>`;
+    });
+
+    // Format list items
+    text = text.replace(/^\* (.*$)/gim, '<div class="gap-list-item">• $1</div>');
+    text = text.replace(/^- (.*$)/gim, '<div class="gap-list-item">• $1</div>');
+
+    // Wrap remaining text blocks
+    let formatted = text
+        .replace(/\n\n/g, '<br><br>')
         .replace(/\n/g, '<br>');
-    return formatted;
+
+    // Wrap in container if compliance gap cards exist
+    if (formatted.includes('compliance-gap-card')) {
+        // Close dangling initial tag
+        if (formatted.startsWith('</div>')) {
+            formatted = formatted.substring(6);
+        }
+        formatted += '</div>';
+    }
+
+    return formatted + drawerSnippet;
 }
 
 function scrollChatToBottom() {

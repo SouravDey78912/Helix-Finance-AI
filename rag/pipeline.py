@@ -16,6 +16,7 @@ from rag.ingest.parser import parse_document
 from rag.ingest.cleaner import clean_text
 from rag.ingest.metadata_extractor import extract_metadata
 from rag.ingest.chunker import chunk_text
+from rag.ingest.entity_extractor import extract_entities_from_chunk
 from rag.ingest.embedder import embed_chunks
 from infrastructure.qdrant_client import upsert_embeddings
 from rag.query.rewriter import rewrite_query
@@ -57,28 +58,38 @@ class RAGPipeline:
             await status_callback("CHUNKING")
         chunks = await chunk_text(cleaned_text, document_id)
         
-        # Merge metadata into chunks
+        # 5. Extract Structured Entities & Merge metadata into chunks
+        if status_callback:
+            await status_callback("EXTRACTING_ENTITIES", len(chunks))
+
+        total_entities_extracted = 0
         for chunk in chunks:
             chunk.metadata.update(extracted_meta)
             chunk.metadata["filename"] = metadata.get("filename", "")
             chunk.metadata["document_id"] = document_id
             
-        # 5. Embed
+            # Extract structured requirements / controls / risks from chunk
+            entities = await extract_entities_from_chunk(chunk.text, chunk.metadata)
+            chunk.metadata["entities"] = entities
+            total_entities_extracted += len(entities)
+
+        # 6. Embed
         if status_callback:
             await status_callback("EMBEDDING", len(chunks))
         embedded_chunks = await embed_chunks(chunks)
         
-        # 6. Store / Index
+        # 7. Store / Index
         if status_callback:
             await status_callback("INDEXING", len(chunks))
         await upsert_embeddings(embedded_chunks)
         
-        logger.info("RAG ingest pipeline successfully completed", document_id=document_id, chunk_count=len(chunks))
+        logger.info("RAG ingest pipeline successfully completed", document_id=document_id, chunk_count=len(chunks), entities_count=total_entities_extracted)
         
         return {
             "document_id": document_id,
             "status": "COMPLETED",
             "chunk_count": len(chunks),
+            "entities_count": total_entities_extracted,
             "metadata": extracted_meta,
         }
 

@@ -158,6 +158,26 @@ async def test_build_context():
 
 
 @pytest.mark.asyncio
+@patch("litellm.acompletion")
+async def test_extract_entities_from_chunk(mock_completion):
+    mock_response = MagicMock()
+    mock_response.choices = [
+        MagicMock(
+            message=MagicMock(
+                content='{"entities": [{"entity_type": "Requirement", "title": "CDD Check", "action": "must complete", "condition": "before onboarding", "obligation_level": "MANDATORY", "risk_category": "KYC"}]}'
+            )
+        )
+    ]
+    mock_completion.return_value = mock_response
+
+    from rag.ingest.entity_extractor import extract_entities_from_chunk
+    entities = await extract_entities_from_chunk("Customer due diligence must be completed before onboarding.")
+    assert len(entities) == 1
+    assert entities[0]["entity_type"] == "Requirement"
+    assert entities[0]["action"] == "must complete"
+
+
+@pytest.mark.asyncio
 @patch("rag.pipeline.upsert_embeddings", new_callable=AsyncMock)
 @patch("rag.pipeline.embed_chunks")
 @patch("rag.pipeline.chunk_text")
@@ -172,13 +192,15 @@ async def test_rag_pipeline_ingest(
     mock_meta.return_value = {"doc_type": "policy", "jurisdiction": "US"}
     
     mock_chunk.return_value = [
-        TextChunk(chunk_id="c1", text="chunk1", chunk_index=0, document_id="doc1", metadata={})
+        TextChunk(chunk_id="c1", text="Customer due diligence must be completed.", chunk_index=0, document_id="doc1", metadata={})
     ]
     mock_embed.return_value = [{"chunk_id": "c1", "embedding": [0.1], "metadata": {}}]
 
     pipeline = RAGPipeline()
     res = await pipeline.ingest("mock_file.txt", "doc1", {"filename": "mock_file.txt", "content_type": "text/plain"})
     
-    assert res["status"] == "indexed"
+    assert res["status"] == "COMPLETED"
     assert res["chunk_count"] == 1
+    assert "entities_count" in res
     mock_upsert.assert_called_once()
+

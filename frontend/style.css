@@ -136,6 +136,19 @@ body.enterprise-theme {
     background: #ffffff;
 }
 
+.search-app-icon {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    background: var(--primary-gradient);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    box-shadow: 0 1px 3px rgba(79, 70, 229, 0.3);
+}
+
 .search-icon {
     width: 16px;
     height: 16px;
@@ -1401,3 +1414,112 @@ body.enterprise-theme {
 .mt-2 { margin-top: 0.5rem; }
 .mt-3 { margin-top: 0.75rem; }
 .mt-4 { margin-top: 1rem; }
+
+/* Chat Markdown Formatting */
+.chat-h1, .gap-header-title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-top: 0.75rem;
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.chat-h2 {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--color-primary);
+    margin-top: 0.6rem;
+    margin-bottom: 0.25rem;
+}
+
+.chat-h3 {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-top: 0.5rem;
+    margin-bottom: 0.2rem;
+}
+
+.chat-li {
+    margin-left: 1.25rem;
+    margin-top: 0.2rem;
+    margin-bottom: 0.2rem;
+    list-style-type: disc;
+}
+
+/* Visual UI Gap Cards */
+.compliance-gap-card {
+    background: #ffffff;
+    border-radius: 12px;
+    padding: 1.1rem;
+    margin-top: 1rem;
+    margin-bottom: 1rem;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 4px 12px -2px rgba(15, 23, 42, 0.06);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.compliance-gap-card:hover {
+    box-shadow: 0 8px 16px -3px rgba(15, 23, 42, 0.1);
+}
+
+.compliance-gap-card.gap-badge-high {
+    border-left: 4px solid #ef4444;
+}
+
+.compliance-gap-card.gap-badge-medium {
+    border-left: 4px solid #f59e0b;
+}
+
+.compliance-gap-card.gap-badge-low {
+    border-left: 4px solid #3b82f6;
+}
+
+.gap-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px dashed var(--border-color);
+}
+
+.gap-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    padding: 0.25rem 0.6rem;
+    border-radius: 6px;
+}
+
+.gap-badge-high {
+    background: #fef2f2;
+    color: #dc2626;
+    border: 1px solid #fecaca;
+}
+
+.gap-badge-medium {
+    background: #fffbeb;
+    color: #d97706;
+    border: 1px solid #fde68a;
+}
+
+.gap-badge-low {
+    background: #eff6ff;
+    color: #2563eb;
+    border: 1px solid #bfdbfe;
+}
+
+.gap-list-item {
+    margin-top: 0.35rem;
+    font-size: 0.86rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+

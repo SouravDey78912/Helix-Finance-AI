@@ -6,6 +6,8 @@
     <title>Helix Finance AI — Enterprise Operations &amp; Governance Suite</title>
     <meta name="description" content="Helix Finance AI — Enterprise Multi-Agent RAG Platform for Financial Document Analysis, AML, KYC &amp; Audit Governance.">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="shortcut icon" href="/favicon.svg">
     <link rel="stylesheet" href="/style.css">
 </head>
 <body class="enterprise-theme">
@@ -21,8 +23,10 @@
         <div class="header-left">
             <div class="logo">
                 <div class="logo-mark">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2L20 5V11C20 16.5 15.5 20.5 12 22C8.5 20.5 4 16.5 4 11V5Z" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M8 14L11 11L13 13 L17 8" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2"/>
+                        <circle cx="17" cy="8" r="1.5" fill="currentColor"/>
                     </svg>
                 </div>
                 <div class="logo-text">
@@ -34,6 +38,13 @@
 
         <div class="header-center">
             <div id="command-search-bar" class="command-search-bar hidden">
+                <div class="search-app-icon" title="Helix AI Search">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2L20 5V11C20 16.5 15.5 20.5 12 22C8.5 20.5 4 16.5 4 11V5Z" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M8 14L11 11L13 13 L17 8" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2"/>
+                        <circle cx="17" cy="8" r="1.2" fill="currentColor"/>
+                    </svg>
+                </div>
                 <svg class="search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                 <input type="text" placeholder="Search documents, AML entities, or ask AI assistant..." readonly onclick="switchTab('chat')">
                 <kbd class="shortcut-key">⌘K</kbd>
