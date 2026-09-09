@@ -114,16 +114,27 @@ The document ingestion pipeline processes incoming files asynchronously using Ce
      - Performs unicode normalization (NFKC).
      - Standardizes and collapses spaces and tabs.
      - Collapses consecutive newlines to double-newlines (`\n\n`) to retain paragraphs.
-   * **Metadata Extraction (`rag/ingest/metadata_extractor.py`)**: 
+   * **Metadata & Entity Extraction (`rag/ingest/metadata_extractor.py`, `rag/ingest/entity_extractor.py`)**: 
      - Runs structured JSON schema extraction using LiteLLM to capture `doc_type`, `jurisdiction`, `effective_date`, `regulatory_body`, `topics`, and `language`.
+     - Automatically parses compliance entities: `Regulation`, `Requirement`, `Internal Control`, and `Evidence` with relational IDs, storing them in chunk vector payloads.
      - Automatically falls back to a regex/keyword-based heuristic parser if the LLM is down or fails.
    * **Chunking (`rag/ingest/chunker.py`)**: 
      - Splits text using `langchain_text_splitters.RecursiveCharacterTextSplitter` by checking newlines and spaces.
-     - Assigns a unique UUID to each chunk and injects the document metadata for Qdrant payload filters.
+     - Assigns a unique UUID to each chunk and injects the document metadata and extracted compliance entities for Qdrant payload filters.
    * **Embedding (`rag/ingest/embedder.py`)**: 
      - Generates 384-dimensional dense vectors using LiteLLM's async `aembedding` endpoint.
    * **Storage (`infrastructure/qdrant_client.py`)**: 
-     - Upserts vectors and metadata payloads using `PointStruct` batches into the Qdrant database.
+     - Upserts vectors, metadata payloads, and extracted structured entities using `PointStruct` batches into the Qdrant database.
+
+### Compliance Gap Analysis Engine
+The system features an automated, graph-based Compliance Gap Analysis Engine (`rag/compliance_graph.py`):
+
+1. **Hierarchy Mapping**: Evaluates relationships across 4 domain tiers (`Regulation` $\rightarrow$ `Requirement` $\rightarrow$ `Internal Control` $\rightarrow$ `Evidence`).
+2. **Missing Element Detection**:
+   - Flagged as `HIGH` severity if a `Requirement` has no mapped `Internal Control`.
+   - Flagged as `MEDIUM` severity if an `Internal Control` has no linked `Evidence`.
+   - Flagged as `LOW` severity for minor administrative or date mismatches.
+3. **Structured Response Integration**: During query execution (`apps/api/v1/chat.py` & `rag/pipeline.py`), compliance analysis outputs generate formatted markdown cards rendered dynamically in the front-end application interface.
 
 ### Query & Retrieval Sub-System
 Retrieves context for natural language questions:
@@ -140,7 +151,8 @@ Retrieves context for natural language questions:
 4. **Context Building (`rag/query/context_builder.py`)**:
    - Aggregates the top reranked chunks.
    - Computes tokens using `tiktoken` (falling back to character estimation if not present) to respect a strict context window token budget (default 3000).
-   - Generates structured citations showing file references and chunk indices.
+   - Generates structured citations showing file references, chunk indices, and compliance entities.
+
 
 
 ---
