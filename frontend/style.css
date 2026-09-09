@@ -1522,4 +1522,16 @@ body.enterprise-theme {
     line-height: 1.5;
 }
 
+/* Greyed-out KPI Preview Cards */
+.kpi-preview-card {
+    background: #f8fafc !important;
+    border: 1px dashed #cbd5e1 !important;
+    opacity: 0.82;
+}
+
+.kpi-preview-card:hover {
+    opacity: 1;
+}
+
+
 
