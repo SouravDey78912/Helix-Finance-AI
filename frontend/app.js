@@ -437,15 +437,108 @@ async function sendMessage() {
     appendMessage('user', query);
     isChatLoading = true;
 
-    // Show agent execution trace panel
-    const typingEl = document.getElementById('typing-indicator');
-    typingEl.classList.remove('hidden');
-    scrollChatToBottom();
-
     const sendBtn = document.getElementById('chat-send-btn');
     sendBtn.disabled = true;
 
     const startTime = Date.now();
+
+    // 1. Instantly create live assistant message container with interactive step timeline
+    const container = document.getElementById('chat-messages');
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'message message-assistant';
+    const listId = `timeline-list-${Date.now()}`;
+
+    const initialSteps = [
+        { title: 'Search Compliance Regulations & Controls', detail: `Targeting: '${query.substring(0, 45)}...'`, status: 'running' },
+        { title: 'Requirement & Control Extraction', detail: 'Parsing policy context chunks', status: 'pending' },
+        { title: 'Compliance Gap Analysis', detail: 'Evaluating control coverage', status: 'pending' },
+        { title: 'Risk Assessment & Verification', detail: 'Calculating severity levels', status: 'pending' },
+        { title: 'Human Approval Gate', detail: 'Awaiting compliance officer review', status: 'pending' }
+    ];
+
+    const renderTimelineHtml = (stepList, activeStepIdx, isDone = false) => {
+        const completedCount = isDone ? 4 : Math.max(1, activeStepIdx);
+        const items = stepList.map((s, idx) => {
+            let stClass = s.status;
+            let iconSvg = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/></svg>';
+            
+            if (isDone) {
+                if (idx < 4) {
+                    stClass = 'completed';
+                    iconSvg = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><polyline points="20 6 9 17 4 12"/></svg>';
+                } else if (idx === 4) {
+                    stClass = 'running';
+                    iconSvg = '<svg class="spinner-svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="10"/></svg>';
+                }
+            } else {
+                if (idx < activeStepIdx) {
+                    stClass = 'completed';
+                    iconSvg = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><polyline points="20 6 9 17 4 12"/></svg>';
+                } else if (idx === activeStepIdx) {
+                    stClass = 'running';
+                    iconSvg = '<svg class="spinner-svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="10"/></svg>';
+                } else {
+                    stClass = 'pending';
+                    iconSvg = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/></svg>';
+                }
+            }
+            return `
+                <div class="timeline-step-item ${stClass}">
+                    <div class="step-num-badge">${iconSvg}</div>
+                    <div>
+                        <span class="step-info-title">${escapeHtml(s.title)}</span>
+                        <span class="step-info-detail">${s.detail ? `— ${escapeHtml(s.detail)}` : ''}</span>
+                    </div>
+                </div>`;
+        }).join('');
+
+        return `
+            <div class="agent-steps-timeline">
+                <div class="timeline-header" onclick="toggleTimeline('${listId}')">
+                    <div style="display:flex;align-items:center;gap:0.4rem;">
+                        <span class="pulse-agent-icon" style="display:inline-flex;align-items:center;gap:4px;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="3"/><circle cx="5" cy="19" r="3"/><circle cx="19" cy="19" r="3"/><line x1="12" y1="8" x2="5" y2="16"/><line x1="12" y1="8" x2="19" y2="16"/></svg>
+                            <strong style="color:#0f172a;font-weight:600;">Helix AI Assistant</strong>
+                        </span>
+                        <span style="font-weight:500;color:#64748b;" id="step-count-${listId}">· ${completedCount}/5 steps</span>
+                    </div>
+                    <span class="timeline-toggle-icon" id="toggle-${listId}">▾ Details</span>
+                </div>
+                <div class="timeline-step-list collapsed" id="${listId}">
+                    ${items}
+                </div>
+            </div>`;
+    };
+
+    msgDiv.innerHTML = `
+        <div class="message-avatar">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+            </svg>
+        </div>
+        <div class="message-content">
+            <div class="message-bubble assistant-bubble">
+                <div class="prefix-container">${renderTimelineHtml(initialSteps, 0)}</div>
+                <div class="body-text-container"></div>
+                <div class="suffix-container"></div>
+            </div>
+            <div class="message-meta">Helix AI Network · Active Investigation</div>
+        </div>`;
+
+    container.appendChild(msgDiv);
+    scrollChatToBottom();
+
+    // 2. Animate step progression live while backend processes query
+    let currentStepIdx = 0;
+    const stepTimer = setInterval(() => {
+        if (currentStepIdx < 3) {
+            currentStepIdx++;
+            const prefixEl = msgDiv.querySelector('.prefix-container');
+            if (prefixEl) {
+                prefixEl.innerHTML = renderTimelineHtml(initialSteps, currentStepIdx);
+            }
+        }
+    }, 700);
 
     try {
         const body = {
@@ -462,34 +555,91 @@ async function sendMessage() {
             body: JSON.stringify(body)
         });
 
+        clearInterval(stepTimer);
         const elapsedMs = Date.now() - startTime;
 
         if (!res.ok) {
             const err = await res.json();
-            appendMessage('assistant', `⚠️ Execution Error: ${err.detail || 'Failed to generate response.'}`);
+            const bodyEl = msgDiv.querySelector('.body-text-container');
+            if (bodyEl) bodyEl.innerHTML = `<p style="color:#ef4444;">⚠️ Execution Error: ${escapeHtml(err.detail || 'Failed to generate response.')}</p>`;
             return;
         }
 
         const data = await res.json();
         if (data.session_id) chatSessionId = data.session_id;
 
-        // Render response with confidence and source metadata if present
-        let replyText = data.answer || data.response || 'No response content returned.';
-        
+        // Render actual completed steps from backend data
+        const backendSteps = (data.agent_steps && data.agent_steps.length > 0)
+            ? data.agent_steps
+            : initialSteps;
+
+        const finalTimelineHtml = renderTimelineHtml(backendSteps, 4, true);
+        const prefixEl = msgDiv.querySelector('.prefix-container');
+        if (prefixEl) prefixEl.innerHTML = finalTimelineHtml;
+
+        // 3. Build Human Approval Card
+        let approvalMarkup = '';
+        if (data.status === 'PENDING_APPROVAL' && data.pending_approval) {
+            const pa = data.pending_approval;
+            const gapsList = (pa.gaps || []).map(g => `
+                <div class="approval-gap-entry">
+                    <strong>[${escapeHtml(g.severity)}] ${escapeHtml(g.requirement_title || 'Obligation')}</strong> — <span style="color:#64748b;">Control: ${escapeHtml(g.control_title)}</span>
+                    <div style="color:#475569;margin-top:0.1rem;">${escapeHtml(g.summary)}</div>
+                </div>`).join('');
+
+            const cardId = `approval-card-${pa.approval_id}`;
+            approvalMarkup = `
+                <div id="${cardId}" class="human-approval-card">
+                    <div class="approval-card-header">
+                        <div class="approval-card-title">
+                            <div style="display:inline-flex;align-items:center;gap:6px;">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                <span style="letter-spacing:0.04em;font-size:0.75rem;font-weight:700;color:#991b1b;">HUMAN APPROVAL REQUIRED</span>
+                            </div>
+                        </div>
+                        <span class="gap-badge ${pa.risk_level === 'HIGH' ? 'gap-badge-high' : 'gap-badge-medium'}">
+                            ${pa.risk_level} RISK
+                        </span>
+                    </div>
+                    <div class="approval-card-body">
+                        <div><strong>Summary:</strong> ${escapeHtml(pa.summary)}</div>
+                        ${gapsList ? `<div class="approval-gaps-list">${gapsList}</div>` : ''}
+                    </div>
+                    <input type="text" id="feedback-${pa.approval_id}" class="approval-feedback-input" placeholder="Optional compliance officer feedback or instructions..." />
+                    <div class="approval-actions-row">
+                        <button class="btn-approve" onclick="submitApproval('${data.session_id}', '${pa.approval_id}', 'APPROVED')">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="margin-right:4px;"><polyline points="20 6 9 17 4 12"/></svg> Approve &amp; Synthesize Report
+                        </button>
+                        <button class="btn-revise" onclick="submitApproval('${data.session_id}', '${pa.approval_id}', 'REVISED')">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> Request Revision
+                        </button>
+                        <button class="btn-reject" onclick="submitApproval('${data.session_id}', '${pa.approval_id}', 'REJECTED')">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:4px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Reject Findings
+                        </button>
+                    </div>
+                </div>`;
+        }
+
+        // Attach approval markup into prefix
+        if (approvalMarkup && prefixEl) {
+            prefixEl.innerHTML = finalTimelineHtml + approvalMarkup;
+        }
+
+        // 4. Cited sources drawer
         let metaExtra = '';
         if (data.sources && data.sources.length > 0) {
             const drawerId = `sources-drawer-${Date.now()}`;
-            
-            // Deduplicate sources by title and build source cards with text excerpts
             const sourceCards = data.sources.map((s, idx) => {
                 const title = escapeHtml(s.title || s.metadata?.filename || `Document ${idx + 1}`);
                 const snippet = escapeHtml(s.chunk_text ? s.chunk_text.trim() : 'Document context match');
                 const relScore = s.score ? (s.score * 100).toFixed(0) + '% match' : '';
-                
                 return `
                     <div class="source-card">
                         <div class="source-card-header">
-                            <span class="source-filename">📄 ${title}</span>
+                            <span class="source-filename" style="display:inline-flex;align-items:center;">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                                ${title}
+                            </span>
                             ${relScore ? `<span class="source-score-badge">${relScore}</span>` : ''}
                         </div>
                         <div class="source-excerpt">"${snippet}"</div>
@@ -504,26 +654,204 @@ async function sendMessage() {
                                 <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
                             </svg>
                         </span>
-                        <span>📚 Cited Sources (${data.sources.length})</span>
+                        <span style="display:inline-flex;align-items:center;">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                            Cited Sources (${data.sources.length})
+                        </span>
                     </button>
                     <div id="${drawerId}" class="source-drawer hidden">
                         ${sourceCards}
                     </div>
                 </div>`;
+            const suffixEl = msgDiv.querySelector('.suffix-container');
+            if (suffixEl) suffixEl.innerHTML = metaExtra;
         }
 
-        appendMessage('assistant', replyText + metaExtra);
+        // 5. Stream body text with typewriter animation
+        const bodyEl = msgDiv.querySelector('.body-text-container');
+        const replyText = data.answer || data.response || 'No content returned.';
+        
+        let i = 0;
+        const chunkSize = 5;
+        const typeTimer = setInterval(() => {
+            if (i < replyText.length) {
+                i += chunkSize;
+                bodyEl.innerHTML = formatMessageContent(replyText.substring(0, i));
+                scrollChatToBottom();
+            } else {
+                bodyEl.innerHTML = formatMessageContent(replyText);
+                clearInterval(typeTimer);
+                scrollChatToBottom();
+            }
+        }, 16);
+
         document.getElementById('chat-latency').textContent = `Agent Latency: ${elapsedMs}ms | Session: ${chatSessionId ? chatSessionId.substring(0, 8) : 'new'}`;
 
     } catch (err) {
-        appendMessage('assistant', '⚠️ Server connection error while contacting agent network.');
+        clearInterval(stepTimer);
+        const bodyEl = msgDiv.querySelector('.body-text-container');
+        if (bodyEl) bodyEl.innerHTML = '<p style="color:#ef4444;">⚠️ Server connection error while contacting agent network.</p>';
     } finally {
         isChatLoading = false;
-        typingEl.classList.add('hidden');
         sendBtn.disabled = false;
         scrollChatToBottom();
     }
 }
+
+function toggleTimeline(listId) {
+    const list = document.getElementById(listId);
+    const toggleBtn = document.getElementById(`toggle-${listId}`);
+    if (list) {
+        const isCollapsed = list.classList.toggle('collapsed');
+        if (toggleBtn) toggleBtn.innerText = isCollapsed ? '▾ Details' : '▴ Hide';
+        scrollChatToBottom();
+    }
+}
+
+function streamMessageContent(sender, prefixHtml, bodyText, suffixHtml) {
+    const container = document.getElementById('chat-messages');
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `message message-${sender}`;
+
+    const avatar = `
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+        </svg>`;
+
+    msgDiv.innerHTML = `
+        <div class="message-avatar">${avatar}</div>
+        <div class="message-content">
+            <div class="message-bubble assistant-bubble">
+                <div class="prefix-container">${prefixHtml}</div>
+                <div class="body-text-container"></div>
+                <div class="suffix-container">${suffixHtml}</div>
+            </div>
+            <div class="message-meta">Helix Agent Network · Live AG-UI Stream</div>
+        </div>`;
+
+    container.appendChild(msgDiv);
+    scrollChatToBottom();
+
+    const bodyEl = msgDiv.querySelector('.body-text-container');
+    
+    // Typewriter streaming chunk by chunk
+    let i = 0;
+    const chunkSize = 6;
+    const interval = setInterval(() => {
+        if (i < bodyText.length) {
+            i += chunkSize;
+            const currentSub = bodyText.substring(0, i);
+            bodyEl.innerHTML = formatMessageContent(currentSub);
+            scrollChatToBottom();
+        } else {
+            bodyEl.innerHTML = formatMessageContent(bodyText);
+            clearInterval(interval);
+            scrollChatToBottom();
+        }
+    }, 16);
+}
+
+
+async function submitApproval(sessionId, approvalId, decision) {
+    const feedbackInput = document.getElementById(`feedback-${approvalId}`);
+    const feedback = feedbackInput ? feedbackInput.value.trim() : '';
+
+    const card = document.getElementById(`approval-card-${approvalId}`);
+    const msgBubble = card ? card.closest('.message-bubble') : null;
+    const bodyEl = msgBubble ? msgBubble.querySelector('.body-text-container') : null;
+
+    // 1. Immediately update top timeline to show Step 5 completed
+    if (msgBubble) {
+        const stepCountEl = msgBubble.querySelector('[id^="step-count-"]');
+        if (stepCountEl) stepCountEl.textContent = '· 5/5 steps completed';
+
+        const timelineList = msgBubble.querySelector('.timeline-step-list');
+        if (timelineList) {
+            const stepItems = timelineList.querySelectorAll('.timeline-step-item');
+            if (stepItems && stepItems.length >= 5) {
+                const step5 = stepItems[4];
+                step5.className = 'timeline-step-item completed';
+                const badge = step5.querySelector('.step-num-badge');
+                if (badge) badge.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><polyline points="20 6 9 17 4 12"/></svg>';
+                const detail = step5.querySelector('.step-info-detail');
+                if (detail) detail.textContent = `— Approved by user (${decision})`;
+            }
+        }
+    }
+
+    // 2. Immediately convert Approval Card to success state on click
+    if (card) {
+        card.style.opacity = '1';
+        card.style.pointerEvents = 'none';
+        card.style.borderColor = '#bbf7d0';
+        card.style.background = '#f0fdf4';
+        card.innerHTML = `
+            <div style="display:inline-flex;align-items:center;gap:6px;font-weight:700;color:#15803d;padding:0.2rem 0;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                Human Approval Recorded: <strong>${decision}</strong>
+                ${feedback ? `<span style="font-weight:400;color:#475569;margin-left:0.5rem;">— Feedback: "${escapeHtml(feedback)}"</span>` : ''}
+            </div>`;
+    }
+
+    // 3. Immediately insert live report synthesis loader in body area
+    if (bodyEl) {
+        bodyEl.innerHTML = `
+            <div id="synth-live-loader" style="display:inline-flex;align-items:center;gap:8px;background:#eff6ff;border:1px solid #bfdbfe;padding:0.6rem 0.9rem;border-radius:8px;font-weight:600;color:#1d4ed8;font-size:0.82rem;margin:0.5rem 0;">
+                <svg class="spinner-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="10"/></svg>
+                <span>Synthesizing Executive Compliance Audit Report...</span>
+            </div>`;
+        scrollChatToBottom();
+    }
+
+    try {
+        const res = await fetch('/api/v1/chat/approve', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                session_id: sessionId,
+                approval_id: approvalId,
+                decision: decision,
+                feedback: feedback || null
+            })
+        });
+
+        if (!res.ok) {
+            if (bodyEl) bodyEl.innerHTML = '<p style="color:#ef4444;">⚠️ Failed to submit approval decision.</p>';
+            return;
+        }
+
+        const data = await res.json();
+        const finalAnswerText = data.answer || 'Analysis complete.';
+
+        // 4. Typewriter stream final synthesized audit report live into body container
+        if (bodyEl) {
+            let i = 0;
+            const chunkSize = 6;
+            const typeTimer = setInterval(() => {
+                if (i < finalAnswerText.length) {
+                    i += chunkSize;
+                    bodyEl.innerHTML = formatMessageContent(finalAnswerText.substring(0, i));
+                    scrollChatToBottom();
+                } else {
+                    bodyEl.innerHTML = formatMessageContent(finalAnswerText);
+                    clearInterval(typeTimer);
+                    scrollChatToBottom();
+                }
+            }, 16);
+        } else {
+            streamMessageContent('assistant', '', finalAnswerText, '');
+        }
+
+    } catch (err) {
+        if (bodyEl) bodyEl.innerHTML = '<p style="color:#ef4444;">⚠️ Error communicating approval decision.</p>';
+    } finally {
+        scrollChatToBottom();
+    }
+}
+
 
 function toggleSourceDrawer(drawerId) {
     const drawer = document.getElementById(drawerId);
@@ -539,7 +867,11 @@ function appendMessage(sender, text) {
     msgDiv.className = `message message-${sender}`;
 
     const isUser = sender === 'user';
-    const avatar = isUser ? '👤' : `
+    const avatar = isUser ? `
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+        </svg>` : `
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
         </svg>`;
@@ -585,10 +917,12 @@ function formatMessageContent(content) {
     text = text.replace(/<h4 class="gap-card-title">Severity:\s*(HIGH|MEDIUM|LOW)<\/h4>/gi, (match, severity) => {
         const sev = severity.toUpperCase();
         const badgeClass = sev === 'HIGH' ? 'gap-badge-high' : (sev === 'MEDIUM' ? 'gap-badge-medium' : 'gap-badge-low');
-        const icon = sev === 'HIGH' ? '🚨' : (sev === 'MEDIUM' ? '⚠️' : 'ℹ️');
+        const iconSvg = sev === 'HIGH'
+            ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
+            : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
         return `</div><div class="compliance-gap-card ${badgeClass}">
             <div class="gap-card-header">
-                <span class="gap-badge ${badgeClass}">${icon} ${sev} SEVERITY GAP</span>
+                <span class="gap-badge ${badgeClass}">${iconSvg} ${sev} SEVERITY GAP</span>
             </div>`;
     });
 

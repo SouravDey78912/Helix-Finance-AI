@@ -1,142 +1,52 @@
 """
 apps/api/v1/chat.py
 ====================
-Chat / Query endpoint.
+Chat / Query & AG-UI (Agent User Interaction Protocol) Endpoints.
+Reference: https://docs.ag-ui.com/introduction
 
-POST /chat/query — main RAG query entry point.
-
-Pipeline:
-  1. RAG Hybrid Search + Rerank + Context Building
-  2. LLM answer generation with full context
-  3. Structured response with source citations
+POST /api/v1/chat/query — Single-agent workflow query with AG-UI protocol payload.
+POST /api/v1/chat/approve — Resumes workflow with human approval decision.
+GET /api/v1/chat/ag-ui/stream — Server-Sent Events (SSE) streaming AG-UI protocol events.
 """
 
+import asyncio
+import json
 import time
 import uuid
-
-import litellm
 import structlog
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import StreamingResponse
 
 from apps.config import get_settings
 from apps.dependencies import CurrentUserDep
-from apps.schemas.chat import ChatRequest, ChatResponse, SourceDocument
-from rag.pipeline import RAGPipeline
+from apps.schemas.chat import (
+    AgentStep,
+    ApprovalRequest,
+    ApprovalResponse,
+    ChatRequest,
+    ChatResponse,
+    PendingApproval,
+    SourceDocument,
+)
+from agents.single_agent import start_workflow, resume_workflow, get_workflow_state
+from agents.ag_ui_protocol import (
+    build_ag_ui_protocol_event_sequence,
+    encode_event,
+    create_run_started,
+    create_step_started,
+    create_step_finished,
+    create_interrupt,
+    create_run_finished,
+)
+
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
 settings = get_settings()
 
-_pipeline = RAGPipeline()
 
-SYSTEM_PROMPT = """You are Helix Finance AI, an expert financial analyst, compliance officer, and risk auditor.
-
-You have access to the user's uploaded financial documents, regulatory filings, and compliance reports.
-
-Your task:
-- Answer the user's question using ONLY the provided document context.
-- Be accurate, concise, and cite sources using [Source N] notation.
-- When the user asks about compliance gaps, missing controls, or regulatory deficiencies:
-  * Structure your response into a clear **Compliance Gap Analysis Report**.
-  * Group gaps into sections starting with `#### Severity: HIGH`, `#### Severity: MEDIUM`, or `#### Severity: LOW`.
-  * For each gap, specify:
-    - **Requirement / Regulation**: (e.g. Requirement R-101)
-    - **Mapped Control**: (e.g. Control C-104 or [MISSING])
-    - **Evidence Status**: (e.g. MISSING, OUTDATED, or AVAILABLE)
-    - **Impact Summary & Recommendation**: Concise assessment
-- If the context does not contain enough information, say so clearly.
-- Do NOT fabricate information.
-
-Format your response cleanly using Markdown headings, bullet points, and code blocks for visual clarity.
-"""
-
-
-@router.post(
-    "/query",
-    response_model=ChatResponse,
-    status_code=status.HTTP_200_OK,
-    summary="RAG Document Query",
-    description=(
-        "Submit a natural language query against all indexed documents.\n\n"
-        "**Pipeline**: Query → Rewrite → Hybrid Search → Rerank → Context → LLM → Answer"
-    ),
-)
-async def query(payload: ChatRequest, current_user: CurrentUserDep) -> ChatResponse:
-    start_ts = time.monotonic()
-    session_id = payload.session_id or str(uuid.uuid4())
-
-    logger.info(
-        "chat_query received",
-        user_id=str(current_user.id),
-        session_id=session_id,
-        query_length=len(payload.query),
-    )
-
-    # ── 1. RAG Retrieval ──────────────────────────────────────────────────────
-    try:
-        rag_result = await _pipeline.query(
-            query_text=payload.query,
-            top_k=5,
-            metadata_filter=None,
-        )
-    except Exception as e:
-        logger.error("RAG pipeline failed", error=str(e))
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Retrieval pipeline error: {str(e)}",
-        )
-
-    context_text = rag_result.get("context_text", "")
-    raw_sources = rag_result.get("sources", [])
-
-    # ── 2. LLM Answer Generation ──────────────────────────────────────────────
-    if context_text.strip():
-        user_content = (
-            f"Document Context:\n{context_text}\n\n"
-            f"---\n\n"
-            f"Question: {payload.query}"
-        )
-    else:
-        user_content = (
-            f"No relevant document context was found in the vector database.\n\n"
-            f"Question: {payload.query}"
-        )
-
-    answer = ""
-    try:
-        kwargs: dict = {
-            "model": settings.litellm_model,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            "timeout": 60,
-        }
-        if settings.litellm_base_url:
-            kwargs["api_base"] = settings.litellm_base_url
-        if settings.openai_api_key:
-            kwargs["api_key"] = settings.openai_api_key
-
-        llm_response = await litellm.acompletion(**kwargs)
-        answer = llm_response.choices[0].message.content.strip()
-
-    except Exception as e:
-        logger.warning("LLM generation failed, returning context only", error=str(e))
-        if context_text.strip():
-            answer = (
-                "I retrieved relevant information from your documents, but the "
-                "language model is unavailable right now.\n\n"
-                "**Retrieved Context:**\n\n" + context_text
-            )
-        else:
-            answer = (
-                "No relevant documents were found for your query, and the language "
-                "model is currently unavailable."
-            )
-
-    # ── 3. Build sources ──────────────────────────────────────────────────────
+def _build_sources(raw_sources: list, chunks: list) -> list[SourceDocument]:
     sources: list[SourceDocument] = []
-    chunks = rag_result.get("chunks", [])
     for i, src in enumerate(raw_sources):
         chunk_text = ""
         if i < len(chunks):
@@ -147,27 +57,233 @@ async def query(payload: ChatRequest, current_user: CurrentUserDep) -> ChatRespo
         sources.append(
             SourceDocument(
                 doc_id=src.get("document_id", ""),
-                title=src.get("filename", "Unknown"),
+                title=src.get("filename", "Unknown Document"),
                 chunk_text=chunk_text,
                 score=round(float(raw_score), 4),
                 metadata=src,
             )
         )
+    return sources
 
-    latency_ms = round((time.monotonic() - start_ts) * 1000, 2)
-    logger.info(
-        "chat_query completed",
-        session_id=session_id,
-        source_count=len(sources),
-        latency_ms=latency_ms,
+
+def _build_agent_steps(steps_data: list) -> list[AgentStep]:
+    result = []
+    for item in steps_data:
+        result.append(
+            AgentStep(
+                step_number=item.get("step_number", 1),
+                title=item.get("title", ""),
+                action=item.get("action", ""),
+                status=item.get("status", "completed"),
+                detail=item.get("detail"),
+            )
+        )
+    return result
+
+
+from agents.ag_ui_protocol import build_ag_ui_protocol_event_sequence, encode_event, create_run_started, create_step_started, create_step_finished, create_interrupt, create_run_finished
+
+
+def _build_ag_ui_event_sequence(state: dict, run_id: str, latency_ms: float) -> list[dict]:
+    """Build standardized AG-UI Protocol event envelope sequence using ag-ui-protocol package."""
+    session_id = state.get("session_id", "session-default")
+    return build_ag_ui_protocol_event_sequence(
+        thread_id=session_id,
+        run_id=run_id,
+        query=state.get("query", ""),
+        steps_data=state.get("steps", []),
+        needs_approval=state.get("needs_approval", False),
+        approval_status=state.get("approval_status", "PENDING"),
+        gap_analysis=state.get("gap_analysis"),
+        risk_assessment=state.get("risk_assessment"),
+        approval_id=state.get("approval_id"),
+        final_answer=state.get("final_answer"),
     )
 
-    return ChatResponse(
-        answer=answer,
+
+
+@router.post(
+    "/query",
+    response_model=ChatResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Interactive Agent Query with AG-UI Protocol",
+    description="Submit natural language query to run single-agent workflow formatted with AG-UI protocol events.",
+)
+async def query(payload: ChatRequest, current_user: CurrentUserDep) -> ChatResponse:
+    start_ts = time.monotonic()
+    session_id = payload.session_id or str(uuid.uuid4())
+    run_id = f"run-{uuid.uuid4().hex[:8]}"
+
+    logger.info(
+        "chat_query received for AG-UI single agent workflow",
+        user_id=str(current_user.id),
         session_id=session_id,
+        run_id=run_id,
+        query=payload.query,
+    )
+
+    try:
+        state = await start_workflow(
+            query=payload.query,
+            session_id=session_id,
+            user_id=str(current_user.id),
+        )
+    except Exception as e:
+        logger.error("Single agent workflow failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Single agent workflow error: {str(e)}",
+        )
+
+    sources = _build_sources(state.get("sources", []), state.get("chunks", []))
+    agent_steps = _build_agent_steps(state.get("steps", []))
+    latency_ms = round((time.monotonic() - start_ts) * 1000, 2)
+    ag_ui_events = _build_ag_ui_event_sequence(state, run_id, latency_ms)
+
+    needs_approval = state.get("needs_approval", False)
+    approval_status = state.get("approval_status", "PENDING")
+
+    if needs_approval and approval_status == "PENDING":
+        gap_analysis = state.get("gap_analysis") or {}
+        risk_assessment = state.get("risk_assessment") or {}
+        gaps = gap_analysis.get("gaps", [])
+        risk_level = risk_assessment.get("overall_risk_level", "MEDIUM")
+
+        pending_info = PendingApproval(
+            approval_id=state.get("approval_id") or f"appr-{uuid.uuid4().hex[:8]}",
+            summary=f"Identified {len(gaps)} compliance gaps across retrieved policy documents.",
+            risk_level=risk_level,
+            gaps_count=len(gaps),
+            gaps=gaps,
+            recommendation="Review and approve remediation plan to proceed with final report synthesis.",
+        )
+
+        return ChatResponse(
+            answer=(
+                "**Interactive Compliance Audit In Progress**\n\n"
+                "The agent has retrieved document evidence, extracted requirements, and completed compliance gap analysis. "
+                "**Human Approval is required** to sign off on findings before final report generation."
+            ),
+            session_id=session_id,
+            status="PENDING_APPROVAL",
+            sources=sources,
+            agent_trace=state.get("agent_trace", []),
+            agent_steps=agent_steps,
+            pending_approval=pending_info,
+            ag_ui_events=ag_ui_events,
+            guardrails_triggered=False,
+            latency_ms=latency_ms,
+        )
+
+    return ChatResponse(
+        answer=state.get("final_answer") or "Workflow completed successfully.",
+        session_id=session_id,
+        status="COMPLETED",
         sources=sources,
-        agent_trace=["query_rewriter", "hybrid_search", "reranker", "context_builder", "llm"],
+        agent_trace=state.get("agent_trace", []),
+        agent_steps=agent_steps,
+        pending_approval=None,
+        ag_ui_events=ag_ui_events,
         guardrails_triggered=False,
         latency_ms=latency_ms,
     )
+
+
+@router.post(
+    "/approve",
+    response_model=ApprovalResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Submit Human Approval for Agent Workflow",
+    description="Approve, revise, or reject the agent's gap analysis and risk assessment to finalize synthesis.",
+)
+async def approve(payload: ApprovalRequest, current_user: CurrentUserDep) -> ApprovalResponse:
+    start_ts = time.monotonic()
+    logger.info(
+        "human_approval submitted",
+        session_id=payload.session_id,
+        approval_id=payload.approval_id,
+        decision=payload.decision,
+    )
+
+    try:
+        updated_state = await resume_workflow(
+            session_id=payload.session_id,
+            approval_id=payload.approval_id,
+            decision=payload.decision,
+            feedback=payload.feedback,
+        )
+    except Exception as e:
+        logger.error("Failed to resume single agent workflow", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Workflow resumption error: {str(e)}",
+        )
+
+    sources = _build_sources(updated_state.get("sources", []), updated_state.get("chunks", []))
+    agent_steps = _build_agent_steps(updated_state.get("steps", []))
+    latency_ms = round((time.monotonic() - start_ts) * 1000, 2)
+
+    return ApprovalResponse(
+        session_id=payload.session_id,
+        status="COMPLETED",
+        answer=updated_state.get("final_answer") or "Final analysis complete.",
+        sources=sources,
+        agent_steps=agent_steps,
+        latency_ms=latency_ms,
+    )
+
+
+@router.get(
+    "/ag-ui/stream",
+    summary="AG-UI Protocol SSE Event Stream",
+    description="Server-Sent Events (SSE) stream adhering to the AG-UI 1.0 Specification.",
+)
+async def ag_ui_stream(session_id: str, query_text: str, current_user: CurrentUserDep):
+    """SSE streaming generator yielding AG-UI protocol event payloads."""
+    run_id = f"run-{uuid.uuid4().hex[:8]}"
+
+    async def event_generator():
+        # Event 1: Run Started
+        run_evt = create_run_started(session_id, run_id)
+        yield encode_event(run_evt)
+        await asyncio.sleep(0.1)
+
+        # Run Workflow
+        state = await start_workflow(query=query_text, session_id=session_id, user_id=str(current_user.id))
+
+        # Stream Steps
+        for step in state.get("steps", []):
+            step_title = step.get("title", f"Step-{step.get('step_number', 1)}")
+            s_start = create_step_started(session_id, run_id, step_title)
+            yield encode_event(s_start)
+            await asyncio.sleep(0.05)
+
+            if step.get("status") == "completed":
+                s_end = create_step_finished(session_id, run_id, step_title)
+                yield encode_event(s_end)
+
+        # Stream Interrupt if required
+        if state.get("needs_approval") and state.get("approval_status") == "PENDING":
+            gap_analysis = state.get("gap_analysis") or {}
+            risk_assessment = state.get("risk_assessment") or {}
+            gaps = gap_analysis.get("gaps", [])
+            risk_level = risk_assessment.get("overall_risk_level", "MEDIUM")
+
+            int_evt = create_interrupt(
+                thread_id=session_id,
+                run_id=run_id,
+                interrupt_id=state.get("approval_id") or f"appr-{uuid.uuid4().hex[:8]}",
+                reason="Compliance Gap Sign-Off Required",
+                payload={
+                    "risk_level": risk_level,
+                    "gaps_count": len(gaps),
+                    "gaps": gaps,
+                },
+            )
+            yield encode_event(int_evt)
+        elif state.get("final_answer"):
+            run_fin = create_run_finished(session_id, run_id)
+            yield encode_event(run_fin)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
