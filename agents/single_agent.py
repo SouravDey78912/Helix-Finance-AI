@@ -76,6 +76,39 @@ async def resume_workflow(
     return updated_state
 
 
+async def steer_workflow(
+    session_id: str,
+    steering_instruction: Optional[str] = None,
+    document_ids: Optional[list[str]] = None,
+) -> SingleAgentState:
+    """
+    Resume an evidence-interrupted single-agent workflow with user guidance or new evidence documents.
+    """
+    logger.info(
+        "Steering single agent workflow with evidence/guidance",
+        session_id=session_id,
+        instruction=steering_instruction,
+        doc_count=len(document_ids or []),
+    )
+
+    state = _ACTIVE_AGENT_SESSIONS.get(session_id)
+    if not state:
+        logger.warning("Session state not found for steering, unable to resume", session_id=session_id)
+        raise ValueError(f"No active session state found for session_id: {session_id}")
+
+    if steering_instruction:
+        state["user_steering_instruction"] = steering_instruction
+    if document_ids:
+        state["new_document_ids"] = list(set(state.get("new_document_ids", []) + document_ids))
+
+    state["investigation_status"] = "RESUMING"
+
+    graph = build_single_agent_graph()
+    updated_state = await graph.ainvoke(state)
+    _ACTIVE_AGENT_SESSIONS[session_id] = updated_state
+    return updated_state
+
+
 def get_workflow_state(session_id: str) -> Optional[SingleAgentState]:
     """Retrieve current state for session."""
     return _ACTIVE_AGENT_SESSIONS.get(session_id)

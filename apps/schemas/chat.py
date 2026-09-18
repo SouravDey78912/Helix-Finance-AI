@@ -79,3 +79,9 @@ class ApprovalResponse(BaseModel):
     agent_steps: list[AgentStep] = []
     latency_ms: float | None = None
 
+
+class SteerRequest(BaseModel):
+    session_id: str
+    steering_instruction: str | None = Field(None, description="Direct textual steering instruction for agent")
+    document_ids: list[str] | None = Field(None, description="List of newly ingested evidence document IDs")
+

@@ -65,19 +65,29 @@ class SingleAgentState(TypedDict):
     final_answer: Optional[str]
     agent_trace: List[str]
     error: Optional[str]
+    # Collaborative Evidence Interrupt Fields
+    evidence_requests: List[Dict[str, Any]]
+    user_steering_instruction: Optional[str]
+    new_document_ids: List[str]
+    investigation_status: str  # INVESTIGATING | WAITING_FOR_EVIDENCE | RESUMING | COMPLETED
 
 
 async def planner_node(state: SingleAgentState) -> Dict[str, Any]:
     """Node 1: Plan investigation steps for query."""
     logger.info("SingleAgent planner_node running", query=state["query"])
 
+    effective_query = state["query"]
+    if state.get("user_steering_instruction"):
+        effective_query += f" (Steered focus: {state['user_steering_instruction']})"
+
     plan = [
         "1. Search regulatory compliance guidelines & internal controls",
         "2. Extract requirements & operational control mappings",
         "3. Identify compliance gaps and evidence deficiencies",
-        "4. Assess risk score and verify findings",
-        "5. Request Human Approval for recommended remediations",
-        "6. Synthesize final audit & analysis report",
+        "4. Check for Information Boundaries (Evidence Requests)",
+        "5. Assess risk score and verify findings",
+        "6. Request Human Approval for recommended remediations",
+        "7. Synthesize final audit & analysis report",
     ]
 
     steps: List[AgentStepInfo] = [
@@ -86,7 +96,7 @@ async def planner_node(state: SingleAgentState) -> Dict[str, Any]:
             "title": "Search Compliance Regulations & Controls",
             "action": "Hybrid vector search across regulatory filings & internal policy docs",
             "status": "completed",
-            "detail": f"Targeting query: '{state['query']}'",
+            "detail": f"Targeting query: '{effective_query}'",
         },
         {
             "step_number": 2,
@@ -104,13 +114,20 @@ async def planner_node(state: SingleAgentState) -> Dict[str, Any]:
         },
         {
             "step_number": 4,
+            "title": "Evidence Verification & Information Boundary Check",
+            "action": "Verify if operational evidence is missing for mandatory controls",
+            "status": "pending",
+            "detail": None,
+        },
+        {
+            "step_number": 5,
             "title": "Risk Assessment & Verification",
             "action": "Calculate severity levels (HIGH/MEDIUM/LOW)",
             "status": "pending",
             "detail": None,
         },
         {
-            "step_number": 5,
+            "step_number": 6,
             "title": "Human Approval Gate",
             "action": "Submit findings to compliance officer for sign-off",
             "status": "pending",
@@ -121,6 +138,7 @@ async def planner_node(state: SingleAgentState) -> Dict[str, Any]:
     return {
         "plan": plan,
         "steps": steps,
+        "investigation_status": "INVESTIGATING",
         "agent_trace": state.get("agent_trace", []) + ["planner_node"],
     }
 
@@ -166,7 +184,7 @@ async def analysis_node(state: SingleAgentState) -> Dict[str, Any]:
 
     if not entities and state.get("retrieved_context"):
         entities = [
-            {
+            {   
                 "entity_id": "REQ-01",
                 "entity_type": "Requirement",
                 "title": "Customer Due Diligence (CDD) Identification",
@@ -210,8 +228,58 @@ async def analysis_node(state: SingleAgentState) -> Dict[str, Any]:
     }
 
 
+async def evidence_verifier_node(state: SingleAgentState) -> Dict[str, Any]:
+    """Node 4: Verify operational evidence sufficiency and detect information boundaries."""
+    logger.info("SingleAgent evidence_verifier_node running")
+
+    gap_analysis = state.get("gap_analysis") or {}
+    gaps = gap_analysis.get("gaps", [])
+    evidence_requests: List[Dict[str, Any]] = []
+
+    for gap in gaps:
+        if gap.get("severity") in ("HIGH", "CRITICAL") or gap.get("evidence_status") in ("MISSING", "OUTDATED"):
+            req_title = gap.get("requirement_title", "Mandatory Control Execution")
+            evidence_requests.append({
+                "request_id": f"ev-{uuid.uuid4().hex[:6]}",
+                "title": f"Missing Operational Evidence for: {req_title}",
+                "reason": f"Could not verify whether control '{gap.get('control_title')}' is currently operating effectively.",
+                "suggested_evidence": [
+                    "Recent onboarding / compliance audit report",
+                    "Control execution logs",
+                    "Sample verification records",
+                ],
+            })
+
+    steps = list(state.get("steps", []))
+    if len(steps) >= 4:
+        steps[3]["status"] = "completed"
+        if evidence_requests:
+            steps[3]["detail"] = f"Identified {len(evidence_requests)} information boundaries requiring evidence/steering."
+        else:
+            steps[3]["detail"] = "Sufficient operational evidence verified across retrieved context."
+
+    if evidence_requests and not state.get("user_steering_instruction") and not state.get("new_document_ids"):
+        inv_status = "WAITING_FOR_EVIDENCE"
+    else:
+        inv_status = "INVESTIGATING"
+
+    return {
+        "evidence_requests": evidence_requests,
+        "investigation_status": inv_status,
+        "steps": steps,
+        "agent_trace": state.get("agent_trace", []) + ["evidence_verifier_node"],
+    }
+
+
+def should_interrupt_for_evidence(state: SingleAgentState) -> str:
+    """Check if workflow should pause for evidence/user steering interrupt."""
+    if state.get("investigation_status") == "WAITING_FOR_EVIDENCE":
+        return "wait_evidence"
+    return "verification"
+
+
 async def verification_node(state: SingleAgentState) -> Dict[str, Any]:
-    """Node 4: Perform risk assessment and determine if human approval is needed."""
+    """Node 5: Perform risk assessment and determine if human approval is needed."""
     logger.info("SingleAgent verification_node running")
 
     gap_analysis = state.get("gap_analysis") or {}
@@ -219,12 +287,18 @@ async def verification_node(state: SingleAgentState) -> Dict[str, Any]:
     high_gaps = summary.get("high_severity", 0)
     med_gaps = summary.get("medium_severity", 0)
 
-    if high_gaps > 0:
-        overall_risk = "HIGH"
-    elif med_gaps > 0:
-        overall_risk = "MEDIUM"
+    if state.get("new_document_ids") or state.get("user_steering_instruction"):
+        if high_gaps > 0:
+            overall_risk = "MEDIUM"
+        else:
+            overall_risk = "LOW"
     else:
-        overall_risk = "LOW"
+        if high_gaps > 0:
+            overall_risk = "HIGH"
+        elif med_gaps > 0:
+            overall_risk = "MEDIUM"
+        else:
+            overall_risk = "LOW"
 
     risk_assessment = {
         "overall_risk_level": overall_risk,
@@ -237,9 +311,9 @@ async def verification_node(state: SingleAgentState) -> Dict[str, Any]:
     approval_id = state.get("approval_id") or f"appr-{uuid.uuid4().hex[:8]}"
 
     steps = list(state.get("steps", []))
-    if len(steps) >= 4:
-        steps[3]["status"] = "completed"
-        steps[3]["detail"] = f"Assessed overall risk level: {overall_risk}. Human approval required."
+    if len(steps) >= 5:
+        steps[4]["status"] = "completed"
+        steps[4]["detail"] = f"Assessed overall risk level: {overall_risk}. Human approval required."
 
     return {
         "risk_assessment": risk_assessment,
@@ -251,7 +325,7 @@ async def verification_node(state: SingleAgentState) -> Dict[str, Any]:
 
 
 async def human_approval_node(state: SingleAgentState) -> Dict[str, Any]:
-    """Node 5: Human approval gate."""
+    """Node 6: Human approval gate."""
     logger.info(
         "SingleAgent human_approval_node running",
         approval_status=state.get("approval_status"),
@@ -261,17 +335,17 @@ async def human_approval_node(state: SingleAgentState) -> Dict[str, Any]:
     status = state.get("approval_status", "PENDING")
 
     if status == "PENDING":
-        if len(steps) >= 5:
-            steps[4]["status"] = "running"
-            steps[4]["detail"] = "Awaiting decision from Compliance Officer in AG-UI"
+        if len(steps) >= 6:
+            steps[5]["status"] = "running"
+            steps[5]["detail"] = "Awaiting decision from Compliance Officer in AG-UI"
     elif status in ("APPROVED", "REVISED"):
-        if len(steps) >= 5:
-            steps[4]["status"] = "completed"
-            steps[4]["detail"] = f"Approved by user (Decision: {status})"
+        if len(steps) >= 6:
+            steps[5]["status"] = "completed"
+            steps[5]["detail"] = f"Approved by user (Decision: {status})"
     elif status == "REJECTED":
-        if len(steps) >= 5:
-            steps[4]["status"] = "failed"
-            steps[4]["detail"] = "Rejected by user"
+        if len(steps) >= 6:
+            steps[5]["status"] = "failed"
+            steps[5]["detail"] = "Rejected by user"
 
     return {
         "steps": steps,
@@ -280,7 +354,7 @@ async def human_approval_node(state: SingleAgentState) -> Dict[str, Any]:
 
 
 async def synthesis_node(state: SingleAgentState) -> Dict[str, Any]:
-    """Node 6: Synthesize final output report."""
+    """Node 7: Synthesize final output report."""
     logger.info("SingleAgent synthesis_node running")
 
     if state.get("approval_status") == "REJECTED":
@@ -291,6 +365,7 @@ async def synthesis_node(state: SingleAgentState) -> Dict[str, Any]:
         )
         return {
             "final_answer": answer,
+            "investigation_status": "COMPLETED",
             "agent_trace": state.get("agent_trace", []) + ["synthesis_node"],
         }
 
@@ -314,6 +389,7 @@ async def synthesis_node(state: SingleAgentState) -> Dict[str, Any]:
         f"Risk Level: {risk_assessment.get('overall_risk_level', 'MEDIUM')}\n"
         f"Gaps Count: {len(gaps)}\n"
         f"Human Approval Status: {state.get('approval_status', 'APPROVED')}\n"
+        f"User Steering Input: {state.get('user_steering_instruction', 'None')}\n"
         f"User Feedback: {state.get('approval_feedback', 'None')}\n\n"
         f"Retrieved Document Context:\n{context}\n\n"
         f"Gap Details:\n{gaps}"
@@ -327,17 +403,22 @@ async def synthesis_node(state: SingleAgentState) -> Dict[str, Any]:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "timeout": 8,
+            "stream": True,
+            "timeout": 12,
         }
         if settings.litellm_base_url:
             kwargs["api_base"] = settings.litellm_base_url
         if settings.openai_api_key:
             kwargs["api_key"] = settings.openai_api_key
 
-        resp = await litellm.acompletion(**kwargs)
-        final_answer = resp.choices[0].message.content.strip()
+        response_stream = await litellm.acompletion(**kwargs)
+        async for chunk in response_stream:
+            content = chunk.choices[0].delta.content or ""
+            final_answer += content
+
+        final_answer = final_answer.strip()
     except Exception as e:
-        logger.warning("LLM synthesis failed, constructing structured fallback", error=str(e))
+        logger.warning("LLM streaming synthesis failed, constructing structured fallback", error=str(e))
         gap_lines = []
         for g in gaps:
             gap_lines.append(
@@ -361,6 +442,7 @@ async def synthesis_node(state: SingleAgentState) -> Dict[str, Any]:
 
     return {
         "final_answer": final_answer,
+        "investigation_status": "COMPLETED",
         "agent_trace": state.get("agent_trace", []) + ["synthesis_node"],
     }
 
@@ -374,12 +456,13 @@ def should_continue_after_approval(state: SingleAgentState) -> str:
 
 
 def build_single_agent_graph():
-    """Build the LangGraph StateGraph for the single-agent interactive workflow."""
+    """Build the LangGraph StateGraph for the single-agent interactive workflow with evidence interrupts."""
     workflow = StateGraph(SingleAgentState)
 
     workflow.add_node("planner", planner_node)
     workflow.add_node("retrieval", retrieval_node)
     workflow.add_node("analysis", analysis_node)
+    workflow.add_node("evidence_verifier", evidence_verifier_node)
     workflow.add_node("verification", verification_node)
     workflow.add_node("human_approval", human_approval_node)
     workflow.add_node("synthesis", synthesis_node)
@@ -387,7 +470,17 @@ def build_single_agent_graph():
     workflow.set_entry_point("planner")
     workflow.add_edge("planner", "retrieval")
     workflow.add_edge("retrieval", "analysis")
-    workflow.add_edge("analysis", "verification")
+    workflow.add_edge("analysis", "evidence_verifier")
+
+    workflow.add_conditional_edges(
+        "evidence_verifier",
+        should_interrupt_for_evidence,
+        {
+            "wait_evidence": END,
+            "verification": "verification",
+        },
+    )
+
     workflow.add_edge("verification", "human_approval")
 
     workflow.add_conditional_edges(
@@ -425,6 +518,10 @@ async def run_query(query: str, session_id: str, user_id: str) -> SingleAgentSta
         "final_answer": None,
         "agent_trace": [],
         "error": None,
+        "evidence_requests": [],
+        "user_steering_instruction": None,
+        "new_document_ids": [],
+        "investigation_status": "INVESTIGATING",
     }
 
     result = await graph.ainvoke(initial_state)

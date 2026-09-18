@@ -87,6 +87,8 @@ def build_ag_ui_protocol_event_sequence(
     risk_assessment: Optional[Dict[str, Any]],
     approval_id: Optional[str],
     final_answer: Optional[str],
+    investigation_status: Optional[str] = "INVESTIGATING",
+    evidence_requests: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """Build serialized event dictionaries conforming to ag-ui-protocol package."""
     events = []
@@ -118,13 +120,43 @@ def build_ag_ui_protocol_event_sequence(
                 "stepName": step_title,
             })
 
-    # 3. Interrupt if pending
-    if needs_approval and approval_status == "PENDING":
+    # 3. Information Boundary / Evidence Request Interrupt
+    if investigation_status == "WAITING_FOR_EVIDENCE" and evidence_requests:
+        int_id = f"evint-{uuid.uuid4().hex[:8]}"
+        payload_data = {
+            "interrupt_type": "EVIDENCE_REQUEST",
+            "message": "The agent encountered an information boundary. Supporting operational evidence is required.",
+            "evidence_requests": evidence_requests,
+            "suggested_actions": [
+                {"action_id": "UPLOAD_EVIDENCE", "label": "📎 Upload Supporting Document"},
+                {"action_id": "PROVIDE_DIRECTION", "label": "💬 Tell Agent Where To Look"},
+                {"action_id": "CONTINUE_AS_IS", "label": "➡️ Continue Without Evidence"},
+            ],
+        }
+        int_evt = create_interrupt(
+            thread_id=thread_id,
+            run_id=run_id,
+            interrupt_id=int_id,
+            reason="Missing Operational Evidence / Control Verification Boundary",
+            payload=payload_data,
+        )
+        events.append({
+            "type": "INTERRUPT",
+            "threadId": thread_id,
+            "runId": run_id,
+            "interruptId": int_id,
+            "reason": int_evt.reason,
+            "payload": payload_data,
+        })
+
+    # 4. Human Approval Interrupt if pending
+    elif needs_approval and approval_status == "PENDING":
         gaps = (gap_analysis or {}).get("gaps", [])
         risk_level = (risk_assessment or {}).get("overall_risk_level", "MEDIUM")
         int_id = approval_id or f"appr-{uuid.uuid4().hex[:8]}"
 
         payload_data = {
+            "interrupt_type": "HUMAN_APPROVAL",
             "risk_level": risk_level,
             "gaps_count": len(gaps),
             "gaps": gaps,

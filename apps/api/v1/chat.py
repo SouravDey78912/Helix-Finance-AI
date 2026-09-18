@@ -27,8 +27,9 @@ from apps.schemas.chat import (
     ChatResponse,
     PendingApproval,
     SourceDocument,
+    SteerRequest,
 )
-from agents.single_agent import start_workflow, resume_workflow, get_workflow_state
+from agents.single_agent import start_workflow, resume_workflow, steer_workflow, get_workflow_state
 from agents.ag_ui_protocol import (
     build_ag_ui_protocol_event_sequence,
     encode_event,
@@ -81,9 +82,6 @@ def _build_agent_steps(steps_data: list) -> list[AgentStep]:
     return result
 
 
-from agents.ag_ui_protocol import build_ag_ui_protocol_event_sequence, encode_event, create_run_started, create_step_started, create_step_finished, create_interrupt, create_run_finished
-
-
 def _build_ag_ui_event_sequence(state: dict, run_id: str, latency_ms: float) -> list[dict]:
     """Build standardized AG-UI Protocol event envelope sequence using ag-ui-protocol package."""
     session_id = state.get("session_id", "session-default")
@@ -98,6 +96,57 @@ def _build_ag_ui_event_sequence(state: dict, run_id: str, latency_ms: float) -> 
         risk_assessment=state.get("risk_assessment"),
         approval_id=state.get("approval_id"),
         final_answer=state.get("final_answer"),
+        investigation_status=state.get("investigation_status", "INVESTIGATING"),
+        evidence_requests=state.get("evidence_requests", []),
+    )
+
+
+@router.post(
+    "/steer",
+    response_model=ChatResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Steer Agent Workflow with Evidence or User Guidance",
+    description="Provide additional document evidence IDs or text guidance to steer an interrupted agent workflow.",
+)
+async def steer(payload: SteerRequest, current_user: CurrentUserDep) -> ChatResponse:
+    start_ts = time.monotonic()
+    run_id = f"run-{uuid.uuid4().hex[:8]}"
+
+    logger.info(
+        "human_steering submitted",
+        session_id=payload.session_id,
+        instruction=payload.steering_instruction,
+        doc_count=len(payload.document_ids or []),
+    )
+
+    try:
+        updated_state = await steer_workflow(
+            session_id=payload.session_id,
+            steering_instruction=payload.steering_instruction,
+            document_ids=payload.document_ids,
+        )
+    except Exception as e:
+        logger.error("Failed to steer single agent workflow", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Workflow steering error: {str(e)}",
+        )
+
+    sources = _build_sources(updated_state.get("sources", []), updated_state.get("chunks", []))
+    agent_steps = _build_agent_steps(updated_state.get("steps", []))
+    latency_ms = round((time.monotonic() - start_ts) * 1000, 2)
+    ag_ui_events = _build_ag_ui_event_sequence(updated_state, run_id, latency_ms)
+
+    return ChatResponse(
+        answer=updated_state.get("final_answer") or "Agent investigation resumed with new evidence/guidance.",
+        session_id=payload.session_id,
+        status=updated_state.get("investigation_status", "COMPLETED"),
+        sources=sources,
+        agent_trace=updated_state.get("agent_trace", []),
+        agent_steps=agent_steps,
+        ag_ui_events=ag_ui_events,
+        guardrails_triggered=False,
+        latency_ms=latency_ms,
     )
 
 
