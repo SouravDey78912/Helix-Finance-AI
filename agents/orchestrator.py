@@ -206,7 +206,7 @@ async def analysis_node(state: SingleAgentState) -> Dict[str, Any]:
                 "entity_id": "EVID-01",
                 "entity_type": "Evidence",
                 "title": "Passport API Verification Log",
-                "status": "OUTDATED",
+                "status": "ACTIVE",
             },
         ]
 
@@ -243,6 +243,7 @@ async def evidence_verifier_node(state: SingleAgentState) -> Dict[str, Any]:
                 "request_id": f"ev-{uuid.uuid4().hex[:6]}",
                 "title": f"Missing Operational Evidence for: {req_title}",
                 "reason": f"Could not verify whether control '{gap.get('control_title')}' is currently operating effectively.",
+                "severity": gap.get("severity", "MEDIUM"),
                 "suggested_evidence": [
                     "Recent onboarding / compliance audit report",
                     "Control execution logs",
@@ -254,11 +255,13 @@ async def evidence_verifier_node(state: SingleAgentState) -> Dict[str, Any]:
     if len(steps) >= 4:
         steps[3]["status"] = "completed"
         if evidence_requests:
-            steps[3]["detail"] = f"Identified {len(evidence_requests)} information boundaries requiring evidence/steering."
+            steps[3]["detail"] = f"Identified {len(evidence_requests)} evidence points across retrieved context."
         else:
             steps[3]["detail"] = "Sufficient operational evidence verified across retrieved context."
 
-    if evidence_requests and not state.get("user_steering_instruction") and not state.get("new_document_ids"):
+    # Only pause workflow for evidence interrupt if CRITICAL evidence boundaries exist or explicit interrupt flag is set
+    has_critical_interrupt = any(g.get("severity") == "CRITICAL" or g.get("requires_interrupt") for g in gaps)
+    if has_critical_interrupt and not state.get("user_steering_instruction") and not state.get("new_document_ids"):
         inv_status = "WAITING_FOR_EVIDENCE"
     else:
         inv_status = "INVESTIGATING"
@@ -389,13 +392,12 @@ async def synthesis_node(state: SingleAgentState) -> Dict[str, Any]:
     )
 
     user_prompt = (
-        f"User Query: {state['query']}\n\n"
+        f"Query: {state['query']}\n"
         f"Risk Level: {risk_assessment.get('overall_risk_level', 'MEDIUM')}\n"
         f"Gaps Count: {len(gaps)}\n"
-        f"Human Approval Status: {state.get('approval_status', 'APPROVED')}\n"
-        f"User Steering Input: {state.get('user_steering_instruction', 'None')}\n"
-        f"User Feedback: {state.get('approval_feedback', 'None')}\n\n"
-        f"Retrieved Document Context:\n{context}\n\n"
+        f"Steering Instruction: {state.get('user_steering_instruction', 'None')}\n"
+        f"Approval Feedback: {state.get('approval_feedback', 'None')}\n\n"
+        f"Key Context Snippet:\n{context[:1500]}\n\n"
         f"Gap Details:\n{gaps}"
     )
 
@@ -407,8 +409,9 @@ async def synthesis_node(state: SingleAgentState) -> Dict[str, Any]:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            "max_tokens": 1000,
             "stream": True,
-            "timeout": 12,
+            "timeout": 10,
         }
         if settings.litellm_base_url:
             kwargs["api_base"] = settings.litellm_base_url
