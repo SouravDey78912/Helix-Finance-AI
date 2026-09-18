@@ -376,12 +376,16 @@ async def synthesis_node(state: SingleAgentState) -> Dict[str, Any]:
 
     system_prompt = (
         "You are Helix Finance AI, an expert compliance agent operating in an interactive workflow.\n"
-        "Generate a comprehensive, executive-level **Compliance Audit & Gap Analysis Report**.\n"
-        "Structure the report with:\n"
-        "1. Executive Summary & Risk Level\n"
-        "2. Key Regulatory Obligations\n"
-        "3. Identified Compliance & Control Gaps (highlight severity HIGH/MEDIUM/LOW)\n"
-        "4. Recommended Remediations & Next Steps\n"
+        "Generate an executive-level **Compliance Audit Presentation Deck**.\n"
+        "Format the output strictly into clear, modular slide decks using high-impact section headers:\n\n"
+        "## Slide 1: Executive Summary & Overview\n"
+        "- Highlight overall compliance status, risk score, and key investigation findings.\n\n"
+        "## Slide 2: Regulatory Obligations & Control Mappings\n"
+        "- List mandatory legal obligations, CDD/AML rules, and existing internal control frameworks.\n\n"
+        "## Slide 3: Identified Gaps & Risk Deficiencies\n"
+        "- Detail specific compliance gaps (HIGH/MEDIUM/LOW) and missing operational execution evidence.\n\n"
+        "## Slide 4: Remediation Action Plan & Governance\n"
+        "- Provide prioritized remediation steps, owner assignments, and audit deadlines.\n"
     )
 
     user_prompt = (

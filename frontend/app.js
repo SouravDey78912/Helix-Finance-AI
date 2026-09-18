@@ -577,9 +577,44 @@ async function sendMessage() {
         const prefixEl = msgDiv.querySelector('.prefix-container');
         if (prefixEl) prefixEl.innerHTML = finalTimelineHtml;
 
-        // 3. Build Human Approval Card
-        let approvalMarkup = '';
-        if (data.status === 'PENDING_APPROVAL' && data.pending_approval) {
+        // 3. Build Evidence Request Interrupt Card or Human Approval Card
+        let interruptMarkup = '';
+        if (data.status === 'WAITING_FOR_EVIDENCE' || (data.ag_ui_events && data.ag_ui_events.some(e => e.payload && e.payload.interrupt_type === 'EVIDENCE_REQUEST'))) {
+            const evEvt = (data.ag_ui_events || []).find(e => e.payload && e.payload.interrupt_type === 'EVIDENCE_REQUEST');
+            const reqs = (evEvt?.payload?.evidence_requests || []);
+            const reqsList = reqs.map(r => `
+                <div class="approval-gap-entry">
+                    <strong>⚠️ ${escapeHtml(r.title)}</strong>
+                    <div style="color:#475569;margin-top:0.15rem;">${escapeHtml(r.reason)}</div>
+                    <div style="color:#0284c7;font-size:0.8rem;margin-top:0.25rem;">Suggested Evidence: ${(r.suggested_evidence || []).join(', ')}</div>
+                </div>`).join('');
+
+            interruptMarkup = `
+                <div class="agent-evidence-card">
+                    <div class="agent-evidence-header">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        INFORMATION REQUIRED — AGENT ENCOUNTERED EVIDENCE BOUNDARY
+                    </div>
+                    <div class="agent-evidence-body">
+                        <p style="margin-bottom:0.5rem;font-weight:600;">I found mandatory compliance obligations, but I lack operational execution evidence to verify if controls are operating effectively.</p>
+                        ${reqsList}
+                        <div style="margin-top:0.75rem;">
+                            <input type="text" id="steer-input-${chatSessionId}" class="approval-feedback-input" placeholder="Tell agent where to look (e.g. 'Search Q2 Internal Audit Report')..." />
+                            <div class="agent-steering-actions">
+                                <button class="btn-steer-action" onclick="submitSteer('${chatSessionId}')">
+                                    💬 Direct Agent & Resume
+                                </button>
+                                <button class="btn-steer-action" onclick="switchTab('pipeline')">
+                                    📎 Upload Document Evidence
+                                </button>
+                                <button class="btn-steer-action" onclick="submitSteer('${chatSessionId}', 'Continue as is without evidence')">
+                                    ➡️ Continue Without Evidence
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+        } else if (data.status === 'PENDING_APPROVAL' && data.pending_approval) {
             const pa = data.pending_approval;
             const gapsList = (pa.gaps || []).map(g => `
                 <div class="approval-gap-entry">
@@ -588,7 +623,7 @@ async function sendMessage() {
                 </div>`).join('');
 
             const cardId = `approval-card-${pa.approval_id}`;
-            approvalMarkup = `
+            interruptMarkup = `
                 <div id="${cardId}" class="human-approval-card">
                     <div class="approval-card-header">
                         <div class="approval-card-title">
@@ -620,9 +655,9 @@ async function sendMessage() {
                 </div>`;
         }
 
-        // Attach approval markup into prefix
-        if (approvalMarkup && prefixEl) {
-            prefixEl.innerHTML = finalTimelineHtml + approvalMarkup;
+        // Attach interrupt markup into prefix
+        if (interruptMarkup && prefixEl) {
+            prefixEl.innerHTML = finalTimelineHtml + interruptMarkup;
         }
 
         // 4. Cited sources drawer
@@ -861,6 +896,174 @@ function toggleSourceDrawer(drawerId) {
     }
 }
 
+async function submitSteer(sessionId, defaultInstruction = null) {
+    const inputEl = document.getElementById(`steer-input-${sessionId}`);
+    const instruction = defaultInstruction || (inputEl ? inputEl.value.trim() : '');
+
+    if (!instruction) {
+        alert('Please provide steering guidance or select an action button.');
+        return;
+    }
+
+    const container = document.getElementById('chat-messages');
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'message message-assistant';
+
+    msgDiv.innerHTML = `
+        <div class="message-avatar">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+            </svg>
+        </div>
+        <div class="message-content">
+            <div class="message-bubble assistant-bubble">
+                <div class="prefix-container">
+                    <div style="display:inline-flex;align-items:center;gap:8px;background:#eff6ff;border:1px solid #bfdbfe;padding:0.6rem 0.9rem;border-radius:8px;font-weight:600;color:#1d4ed8;font-size:0.82rem;margin:0.5rem 0;">
+                        <svg class="spinner-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="10"/></svg>
+                        <span>Resuming investigation with guidance: "${escapeHtml(instruction)}"...</span>
+                    </div>
+                </div>
+                <div class="body-text-container"></div>
+            </div>
+            <div class="message-meta">Helix Agent Network · Resuming Workflow</div>
+        </div>`;
+
+    container.appendChild(msgDiv);
+    scrollChatToBottom();
+
+    try {
+        const res = await fetch('/api/v1/chat/steer', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                session_id: sessionId,
+                steering_instruction: instruction,
+            })
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            const bodyEl = msgDiv.querySelector('.body-text-container');
+            if (bodyEl) bodyEl.innerHTML = `<p style="color:#ef4444;">⚠️ Steering Error: ${escapeHtml(err.detail || 'Failed to steer workflow.')}</p>`;
+            return;
+        }
+
+        const data = await res.json();
+        const prefixEl = msgDiv.querySelector('.prefix-container');
+
+        // Update step timeline to show Risk Assessment completed and Human Approval Gate running
+        const backendSteps = (data.agent_steps && data.agent_steps.length > 0) ? data.agent_steps : [];
+        const renderTimelineHtml = (stepList) => {
+            const items = stepList.map((s, idx) => {
+                let stClass = s.status;
+                let iconSvg = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/></svg>';
+                if (s.status === 'completed') {
+                    iconSvg = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><polyline points="20 6 9 17 4 12"/></svg>';
+                } else if (s.status === 'running') {
+                    iconSvg = '<svg class="spinner-svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="10"/></svg>';
+                }
+                return `
+                    <div class="timeline-step-item ${stClass}">
+                        <div class="step-num-badge">${iconSvg}</div>
+                        <div>
+                            <span class="step-info-title">${escapeHtml(s.title)}</span>
+                            <span class="step-info-detail">${s.detail ? `— ${escapeHtml(s.detail)}` : ''}</span>
+                        </div>
+                    </div>`;
+            }).join('');
+
+            return `
+                <div class="agent-steps-timeline">
+                    <div class="timeline-header">
+                        <div style="display:flex;align-items:center;gap:0.4rem;">
+                            <span class="pulse-agent-icon" style="display:inline-flex;align-items:center;gap:4px;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="3"/><circle cx="5" cy="19" r="3"/><circle cx="19" cy="19" r="3"/><line x1="12" y1="8" x2="5" y2="16"/><line x1="12" y1="8" x2="19" y2="16"/></svg>
+                                <strong style="color:#0f172a;font-weight:600;">Helix AI Assistant</strong>
+                            </span>
+                            <span style="font-weight:500;color:#64748b;">· Resumed Investigation</span>
+                        </div>
+                    </div>
+                    <div class="timeline-step-list">
+                        ${items}
+                    </div>
+                </div>`;
+        };
+
+        const timelineMarkup = renderTimelineHtml(backendSteps);
+
+        if (data.status === 'PENDING_APPROVAL' && data.pending_approval) {
+            const pa = data.pending_approval;
+            const gapsList = (pa.gaps || []).map(g => `
+                <div class="approval-gap-entry">
+                    <strong>[${escapeHtml(g.severity)}] ${escapeHtml(g.requirement_title || 'Obligation')}</strong> — <span style="color:#64748b;">Control: ${escapeHtml(g.control_title)}</span>
+                    <div style="color:#475569;margin-top:0.1rem;">${escapeHtml(g.summary)}</div>
+                </div>`).join('');
+
+            const cardId = `approval-card-${pa.approval_id}`;
+            const approvalMarkup = `
+                <div id="${cardId}" class="human-approval-card">
+                    <div class="approval-card-header">
+                        <div class="approval-card-title">
+                            <div style="display:inline-flex;align-items:center;gap:6px;">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                <span style="letter-spacing:0.04em;font-size:0.75rem;font-weight:700;color:#991b1b;">HUMAN APPROVAL REQUIRED</span>
+                            </div>
+                        </div>
+                        <span class="gap-badge ${pa.risk_level === 'HIGH' ? 'gap-badge-high' : 'gap-badge-medium'}">
+                            ${pa.risk_level} RISK
+                        </span>
+                    </div>
+                    <div class="approval-card-body">
+                        <div><strong>Summary:</strong> ${escapeHtml(pa.summary)}</div>
+                        ${gapsList ? `<div class="approval-gaps-list">${gapsList}</div>` : ''}
+                    </div>
+                    <input type="text" id="feedback-${pa.approval_id}" class="approval-feedback-input" placeholder="Optional compliance officer feedback or instructions..." />
+                    <div class="approval-actions-row">
+                        <button class="btn-approve" onclick="submitApproval('${data.session_id}', '${pa.approval_id}', 'APPROVED')">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="margin-right:4px;"><polyline points="20 6 9 17 4 12"/></svg> Approve &amp; Synthesize Report
+                        </button>
+                        <button class="btn-revise" onclick="submitApproval('${data.session_id}', '${pa.approval_id}', 'REVISED')">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> Request Revision
+                        </button>
+                        <button class="btn-reject" onclick="submitApproval('${data.session_id}', '${pa.approval_id}', 'REJECTED')">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:4px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Reject Findings
+                        </button>
+                    </div>
+                </div>`;
+            if (prefixEl) prefixEl.innerHTML = timelineMarkup + approvalMarkup;
+        } else if (prefixEl) {
+            prefixEl.innerHTML = timelineMarkup;
+        }
+
+        const bodyEl = msgDiv.querySelector('.body-text-container');
+        const replyText = data.answer || 'Investigation resumed successfully.';
+        if (bodyEl) {
+            let i = 0;
+            const chunkSize = 5;
+            const typeTimer = setInterval(() => {
+                if (i < replyText.length) {
+                    i += chunkSize;
+                    bodyEl.innerHTML = formatMessageContent(replyText.substring(0, i));
+                    scrollChatToBottom();
+                } else {
+                    bodyEl.innerHTML = formatMessageContent(replyText);
+                    clearInterval(typeTimer);
+                    scrollChatToBottom();
+                }
+            }, 16);
+        }
+
+    } catch (err) {
+        const bodyEl = msgDiv.querySelector('.body-text-container');
+        if (bodyEl) bodyEl.innerHTML = '<p style="color:#ef4444;">⚠️ Error steering agent workflow.</p>';
+    } finally {
+        scrollChatToBottom();
+    }
+}
+
 function appendMessage(sender, text) {
     const container = document.getElementById('chat-messages');
     const msgDiv = document.createElement('div');
@@ -905,46 +1108,109 @@ function formatMessageContent(content) {
     // Pre-clean spaces around markdown asterisks
     text = text.replace(/\*\s*\*/g, '**');
 
-    // Parse markdown headers
+    // ── Executive Presentation Slide Deck Formatter ────────────────────────────
+    if (text.includes('Slide ') || text.includes('## Executive Summary')) {
+        const deckId = `deck-${Date.now()}`;
+        
+        // Transform Markdown headers into visual presentation slides
+        text = text.replace(/^## (Slide \d+:?.*$)/gim, `</div><div class="deck-slide-card"><span class="slide-num-badge">PRESENTATION SLIDE</span><h3 class="gap-header-title">$1</h3>`);
+        text = text.replace(/^## (.*$)/gim, `</div><div class="deck-slide-card"><span class="slide-num-badge">SECTION SLIDE</span><h3 class="gap-header-title">$1</h3>`);
+        text = text.replace(/^### (.*$)/gim, '<h4 class="gap-card-title">$1</h4>');
+        
+        text = text.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-slate-800">$1</strong>');
+        text = text.replace(/^\* (.*$)/gim, '<div class="gap-list-item">• $1</div>');
+        text = text.replace(/^- (.*$)/gim, '<div class="gap-list-item">• $1</div>');
+
+        let formattedDeck = text.replace(/\n\n/g, '<br><br>').replace(/\n/g, '<br>');
+
+        if (formattedDeck.startsWith('</div>')) {
+            formattedDeck = formattedDeck.substring(6);
+        }
+        formattedDeck += '</div>';
+
+        const toolbarHtml = `
+            <div class="report-deck-container" id="${deckId}">
+                <div class="report-deck-header">
+                    <div class="deck-title-group">
+                        <h3>📊 Executive Audit Presentation Deck</h3>
+                        <span>Generated by Helix AI Agentic Governance Engine</span>
+                    </div>
+                    <div class="deck-actions-toolbar">
+                        <button class="btn-export-pdf" onclick="exportDeckToPDF('${deckId}')">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                            Export PDF
+                        </button>
+                        <button class="btn-export-ppt" onclick="exportDeckToPPT('${deckId}')">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                            Export PPT (Markdown)
+                        </button>
+                    </div>
+                </div>
+                <div class="deck-slides-body">
+                    ${formattedDeck}
+                </div>
+            </div>`;
+
+        return toolbarHtml + drawerSnippet;
+    }
+
+    // Standard markdown rendering fallback
     text = text.replace(/^#### (.*$)/gim, '<h4 class="gap-card-title">$1</h4>');
     text = text.replace(/^### (.*$)/gim, '<h3 class="gap-header-title">$1</h3>');
     text = text.replace(/^## (.*$)/gim, '<h2 class="gap-header-title">$1</h2>');
 
-    // Transform Markdown bold text
     text = text.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-slate-800">$1</strong>');
-
-    // Convert Severity headings into UI Cards
-    text = text.replace(/<h4 class="gap-card-title">Severity:\s*(HIGH|MEDIUM|LOW)<\/h4>/gi, (match, severity) => {
-        const sev = severity.toUpperCase();
-        const badgeClass = sev === 'HIGH' ? 'gap-badge-high' : (sev === 'MEDIUM' ? 'gap-badge-medium' : 'gap-badge-low');
-        const iconSvg = sev === 'HIGH'
-            ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
-            : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
-        return `</div><div class="compliance-gap-card ${badgeClass}">
-            <div class="gap-card-header">
-                <span class="gap-badge ${badgeClass}">${iconSvg} ${sev} SEVERITY GAP</span>
-            </div>`;
-    });
-
-    // Format list items
     text = text.replace(/^\* (.*$)/gim, '<div class="gap-list-item">• $1</div>');
     text = text.replace(/^- (.*$)/gim, '<div class="gap-list-item">• $1</div>');
 
-    // Wrap remaining text blocks
-    let formatted = text
-        .replace(/\n\n/g, '<br><br>')
-        .replace(/\n/g, '<br>');
-
-    // Wrap in container if compliance gap cards exist
-    if (formatted.includes('compliance-gap-card')) {
-        // Close dangling initial tag
-        if (formatted.startsWith('</div>')) {
-            formatted = formatted.substring(6);
-        }
-        formatted += '</div>';
-    }
+    let formatted = text.replace(/\n\n/g, '<br><br>').replace(/\n/g, '<br>');
 
     return formatted + drawerSnippet;
+}
+
+// ── Export Report Presentation Deck to PDF & PPT ────────────────────────────
+function exportDeckToPDF(deckId) {
+    const el = document.getElementById(deckId);
+    if (!el) return;
+
+    const opt = {
+        margin:       0.4,
+        filename:     `Helix_Compliance_Audit_Deck_${Date.now()}.pdf`,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { scale: 2, useCORS: true },
+        jsPDF:        { unit: 'in', format: 'letter', orientation: 'landscape' }
+    };
+
+    if (window.html2pdf) {
+        window.html2pdf().set(opt).from(el).save();
+    } else {
+        alert('PDF Export library initializing. Please try again in a moment or check network connection.');
+    }
+}
+
+function exportDeckToPPT(deckId) {
+    const el = document.getElementById(deckId);
+    if (!el) return;
+
+    // Convert slide deck HTML text to structured Markdown Presentation format (.md / .pptx compatible)
+    const slides = el.querySelectorAll('.deck-slide-card');
+    let pptContent = `# HELIX FINANCE AI — EXECUTIVE COMPLIANCE AUDIT PRESENTATION\n\n`;
+
+    slides.forEach((slide, idx) => {
+        const title = slide.querySelector('.gap-header-title')?.innerText || `Slide ${idx + 1}`;
+        const items = Array.from(slide.querySelectorAll('.gap-list-item, p')).map(p => `- ${p.innerText}`).join('\n');
+        pptContent += `---\n\n## ${title}\n\n${items}\n\n`;
+    });
+
+    const blob = new Blob([pptContent], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Helix_Compliance_Audit_SlideDeck_${Date.now()}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 
 function scrollChatToBottom() {

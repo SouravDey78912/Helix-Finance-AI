@@ -137,6 +137,41 @@ async def steer(payload: SteerRequest, current_user: CurrentUserDep) -> ChatResp
     latency_ms = round((time.monotonic() - start_ts) * 1000, 2)
     ag_ui_events = _build_ag_ui_event_sequence(updated_state, run_id, latency_ms)
 
+    needs_approval = updated_state.get("needs_approval", False)
+    approval_status = updated_state.get("approval_status", "PENDING")
+
+    if needs_approval and approval_status == "PENDING":
+        gap_analysis = updated_state.get("gap_analysis") or {}
+        risk_assessment = updated_state.get("risk_assessment") or {}
+        gaps = gap_analysis.get("gaps", [])
+        risk_level = risk_assessment.get("overall_risk_level", "MEDIUM")
+
+        pending_info = PendingApproval(
+            approval_id=updated_state.get("approval_id") or f"appr-{uuid.uuid4().hex[:8]}",
+            summary=f"Identified {len(gaps)} compliance gaps across retrieved policy documents.",
+            risk_level=risk_level,
+            gaps_count=len(gaps),
+            gaps=gaps,
+            recommendation="Review and approve remediation plan to proceed with final report synthesis.",
+        )
+
+        return ChatResponse(
+            answer=(
+                "**Steering Guidance Applied**\n\n"
+                "The agent resumed investigation with your guidance/evidence. "
+                "**Human Approval is now required** to sign off on risk findings before final report generation."
+            ),
+            session_id=payload.session_id,
+            status="PENDING_APPROVAL",
+            sources=sources,
+            agent_trace=updated_state.get("agent_trace", []),
+            agent_steps=agent_steps,
+            pending_approval=pending_info,
+            ag_ui_events=ag_ui_events,
+            guardrails_triggered=False,
+            latency_ms=latency_ms,
+        )
+
     return ChatResponse(
         answer=updated_state.get("final_answer") or "Agent investigation resumed with new evidence/guidance.",
         session_id=payload.session_id,
@@ -144,6 +179,7 @@ async def steer(payload: SteerRequest, current_user: CurrentUserDep) -> ChatResp
         sources=sources,
         agent_trace=updated_state.get("agent_trace", []),
         agent_steps=agent_steps,
+        pending_approval=None,
         ag_ui_events=ag_ui_events,
         guardrails_triggered=False,
         latency_ms=latency_ms,
@@ -191,6 +227,25 @@ async def query(payload: ChatRequest, current_user: CurrentUserDep) -> ChatRespo
 
     needs_approval = state.get("needs_approval", False)
     approval_status = state.get("approval_status", "PENDING")
+    inv_status = state.get("investigation_status", "INVESTIGATING")
+
+    if inv_status == "WAITING_FOR_EVIDENCE":
+        return ChatResponse(
+            answer=(
+                "**Information Boundary Encountered**\n\n"
+                "The agent has identified mandatory compliance requirements but lacks operational execution evidence "
+                "to verify whether internal controls are operating effectively. Please provide evidence or steering guidance."
+            ),
+            session_id=session_id,
+            status="WAITING_FOR_EVIDENCE",
+            sources=sources,
+            agent_trace=state.get("agent_trace", []),
+            agent_steps=agent_steps,
+            pending_approval=None,
+            ag_ui_events=ag_ui_events,
+            guardrails_triggered=False,
+            latency_ms=latency_ms,
+        )
 
     if needs_approval and approval_status == "PENDING":
         gap_analysis = state.get("gap_analysis") or {}
