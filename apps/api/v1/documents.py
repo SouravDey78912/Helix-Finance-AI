@@ -5,7 +5,11 @@ Document management endpoints.
 """
 
 import io
+import os
+import tempfile
 import uuid
+from datetime import datetime, timezone
+import structlog
 from fastapi import APIRouter, File, UploadFile, status, Depends, HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +18,10 @@ from apps.dependencies import CurrentUserDep, get_db
 from apps.models.document import Document
 from apps.schemas.documents import DocumentListResponse, DocumentRecord, DocumentUploadResponse
 from infrastructure.minio_client import upload_file_stream, delete_file
+from rag.pipeline import RAGPipeline
 from workers.tasks.ingest_task import ingest_document
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
@@ -34,6 +41,7 @@ router = APIRouter()
 async def upload_document(
     current_user: CurrentUserDep,
     file: UploadFile = File(..., description="Document to ingest (PDF, DOCX, TXT)"),
+    is_interactive: bool = False,
     db: AsyncSession = Depends(get_db),
 ) -> DocumentUploadResponse:
     # Read the file into memory
@@ -60,44 +68,96 @@ async def upload_document(
             detail=f"Failed to store file in MinIO: {str(e)}",
         )
 
-    # Save initial metadata to database with 'UPLOADED' status
+    # Save initial metadata to database with 'QUEUED' status
     db_doc = Document(
         id=doc_id,
         filename=file.filename or "unknown",
         content_type=file.content_type or "application/octet-stream",
         size_bytes=file_size,
-        status="UPLOADED",
+        status="QUEUED",
         metadata_dict={
             "object_name": object_name,
             "uploader_id": str(current_user.id),
+            "is_interactive_evidence": is_interactive,
         },
     )
     db.add(db_doc)
     await db.commit()
     await db.refresh(db_doc)
 
-    # Transition status to QUEUED upon handing over to Celery task queue
-    db_doc.status = "QUEUED"
-    await db.commit()
-    await db.refresh(db_doc)
+    task_id = None
+    if is_interactive:
+        # High-Priority Execution: Interactive Chat / Generative UI evidence documents process inline immediately
+        db_doc.status = "PROCESSING"
+        await db.commit()
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                local_path = os.path.join(tmpdir, db_doc.filename)
+                with open(local_path, "wb") as f:
+                    f.write(file_bytes)
 
-    # Dispatch ingestion task to Celery
-    task = ingest_document.delay(
-        document_id=str(db_doc.id),
-        object_name=object_name,
-        metadata={
-            "filename": db_doc.filename,
-            "content_type": db_doc.content_type,
-            "size_bytes": db_doc.size_bytes,
-        },
-    )
+                pipeline = RAGPipeline()
+                pipeline_res = await pipeline.ingest(
+                    file_path=local_path,
+                    document_id=str(db_doc.id),
+                    metadata={
+                        "filename": db_doc.filename,
+                        "content_type": db_doc.content_type,
+                        "size_bytes": db_doc.size_bytes,
+                    },
+                )
+                db_doc.status = "COMPLETED"
+                db_doc.chunk_count = pipeline_res.get("chunk_count", 0)
+                db_doc.indexed_at = datetime.now(timezone.utc)
+                await db.commit()
+                await db.refresh(db_doc)
+                task_id = f"interactive-{uuid.uuid4().hex[:8]}"
+        except Exception as err:
+            logger.error("Inline interactive ingestion error, falling back to Celery queue", error=str(err))
+            db_doc.status = "QUEUED"
+            await db.commit()
+            task = ingest_document.apply_async(
+                kwargs={
+                    "document_id": str(db_doc.id),
+                    "object_name": object_name,
+                    "metadata": {
+                        "filename": db_doc.filename,
+                        "content_type": db_doc.content_type,
+                        "size_bytes": db_doc.size_bytes,
+                    },
+                },
+                queue="ingest",
+                priority=9,
+            )
+            task_id = str(task.id) if task and getattr(task, "id", None) else str(uuid.uuid4())
+    else:
+        # Standard Queue: Normal background repository uploads process asynchronously via Celery
+        task = ingest_document.apply_async(
+            kwargs={
+                "document_id": str(db_doc.id),
+                "object_name": object_name,
+                "metadata": {
+                    "filename": db_doc.filename,
+                    "content_type": db_doc.content_type,
+                    "size_bytes": db_doc.size_bytes,
+                    "priority": "LOW",
+                },
+            },
+            queue="ingest",
+            priority=1,
+        )
+        task_id = str(task.id) if task and getattr(task, "id", None) else str(uuid.uuid4())
 
     return DocumentUploadResponse(
         document_id=str(db_doc.id),
         filename=db_doc.filename,
-        status="QUEUED",
-        task_id=task.id,
-        message="Document uploaded and queued for ingestion",
+        status=db_doc.status,
+        task_id=task_id,
+        message=(
+            f"Interactive evidence uploaded and indexed immediately ({db_doc.chunk_count or 0} chunks)"
+            if db_doc.status == "COMPLETED"
+            else "Document queued for background ingestion"
+        ),
     )
 
 

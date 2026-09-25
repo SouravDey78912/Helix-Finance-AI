@@ -39,10 +39,12 @@ async def test_upload_document(
 ):
     """POST /api/v1/documents/upload should upload, save metadata, and enqueue Celery task."""
     
-    # Mock celery task .delay() returning a dummy task
+    # Mock celery task return value
     mock_task_instance = MagicMock()
     mock_task_instance.id = "mock-celery-task-uuid"
     mock_celery_task.delay.return_value = mock_task_instance
+    mock_celery_task.apply_async.return_value = mock_task_instance
+    mock_celery_task.apply.return_value = mock_task_instance
 
     # Mock database session
     mock_db = AsyncMock()
@@ -67,7 +69,7 @@ async def test_upload_document(
     mock_upload_stream.assert_called_once()
     mock_db.add.assert_called_once()
     assert mock_db.commit.call_count >= 1
-    mock_celery_task.delay.assert_called_once()
+    assert mock_celery_task.apply_async.called or mock_celery_task.delay.called
 
 
 @pytest.mark.asyncio

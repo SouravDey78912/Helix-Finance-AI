@@ -1472,11 +1472,31 @@ async function handleGenUIFileUpload(inputEl, sessionId) {
             <span>Uploading & ingesting evidence document '${escapeHtml(file.name)}'...</span>`;
     }
 
+    // Disable all action buttons across all Generative UI cards while upload & ingestion is active
+    const allActionBtns = document.querySelectorAll('.gen-ui-card button, .gen-ui-card input[type="radio"]');
+    allActionBtns.forEach(btn => {
+        btn.disabled = true;
+        if (btn.tagName === 'BUTTON') {
+            btn.style.opacity = '0.5';
+            btn.style.cursor = 'not-allowed';
+        }
+    });
+
+    const enableActionBtns = () => {
+        allActionBtns.forEach(btn => {
+            btn.disabled = false;
+            if (btn.tagName === 'BUTTON') {
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+            }
+        });
+    };
+
     const formData = new FormData();
     formData.append('file', file);
 
     try {
-        const res = await fetch('/api/v1/documents/upload', {
+        const res = await fetch('/api/v1/documents/upload?is_interactive=true', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}` },
             body: formData
@@ -1489,21 +1509,61 @@ async function handleGenUIFileUpload(inputEl, sessionId) {
                 filename: file.name
             };
 
-            if (dropzoneEl) {
-                dropzoneEl.style.borderColor = '#10b981';
-                dropzoneEl.style.background = '#ecfdf5';
-                dropzoneEl.innerHTML = `
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-                    <span style="color:#047857;font-weight:700;">✓ Attached Evidence Document: ${escapeHtml(file.name)}</span>
-                    <span style="font-size:0.75rem;color:#059669;">Ready. Select investigation scope and click 'Continue Investigation' below.</span>`;
+            // If the backend already completed inline RAG ingestion synchronously (COMPLETED)
+            if (docData.status === 'COMPLETED' || docData.status === 'indexed') {
+                enableActionBtns();
+                if (dropzoneEl) {
+                    dropzoneEl.style.borderColor = '#10b981';
+                    dropzoneEl.style.background = '#ecfdf5';
+                    dropzoneEl.innerHTML = `
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                        <span style="color:#047857;font-weight:700;">✓ Attached Evidence Document: ${escapeHtml(file.name)}</span>
+                        <span style="font-size:0.75rem;color:#059669;">Parsed & Indexed in Vector DB. Select investigation scope and click 'Continue Investigation' below.</span>`;
+                }
+                return;
             }
+
+            // Fallback polling for Celery background ingestion if async
+            const pollInterval = setInterval(async () => {
+                try {
+                    const statusRes = await fetch(`/api/v1/documents/${docData.document_id}`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (statusRes.ok) {
+                        const statusData = await statusRes.json();
+                        if (statusData.status === 'COMPLETED' || statusData.status === 'indexed') {
+                            clearInterval(pollInterval);
+                            enableActionBtns();
+                            if (dropzoneEl) {
+                                dropzoneEl.style.borderColor = '#10b981';
+                                dropzoneEl.style.background = '#ecfdf5';
+                                dropzoneEl.innerHTML = `
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                                    <span style="color:#047857;font-weight:700;">✓ Attached Evidence Document: ${escapeHtml(file.name)}</span>
+                                    <span style="font-size:0.75rem;color:#059669;">Parsed & Indexed in Vector DB. Select investigation scope and click 'Continue Investigation' below.</span>`;
+                            }
+                        } else if (statusData.status === 'FAILED' || statusData.status === 'ERROR') {
+                            clearInterval(pollInterval);
+                            enableActionBtns();
+                            if (dropzoneEl) {
+                                dropzoneEl.innerHTML = `<span style="color:#ef4444;">⚠️ Document ingestion failed.</span>`;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error('Error polling document status:', e);
+                }
+            }, 1500);
+
         } else {
+            enableActionBtns();
             if (dropzoneEl) {
                 dropzoneEl.innerHTML = `<span style="color:#ef4444;">⚠️ Upload failed. Please try again.</span>`;
             }
         }
     } catch (err) {
         console.error('Error uploading Generative UI evidence file:', err);
+        enableActionBtns();
         if (dropzoneEl) {
             dropzoneEl.innerHTML = `<span style="color:#ef4444;">⚠️ Upload error. Please try again.</span>`;
         }

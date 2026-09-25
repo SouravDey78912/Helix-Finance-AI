@@ -14,11 +14,14 @@ import json
 import time
 import uuid
 import structlog
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from apps.config import get_settings
-from apps.dependencies import CurrentUserDep
+from apps.dependencies import CurrentUserDep, get_db
+from apps.models.document import Document
 from apps.schemas.chat import (
     AgentStep,
     ApprovalRequest,
@@ -108,7 +111,11 @@ def _build_ag_ui_event_sequence(state: dict, run_id: str, latency_ms: float) -> 
     summary="Steer Agent Workflow with Evidence or User Guidance",
     description="Provide additional document evidence IDs or text guidance to steer an interrupted agent workflow.",
 )
-async def steer(payload: SteerRequest, current_user: CurrentUserDep) -> ChatResponse:
+async def steer(
+    payload: SteerRequest, 
+    current_user: CurrentUserDep,
+    db: AsyncSession = Depends(get_db)
+) -> ChatResponse:
     start_ts = time.monotonic()
     run_id = f"run-{uuid.uuid4().hex[:8]}"
 
@@ -118,6 +125,20 @@ async def steer(payload: SteerRequest, current_user: CurrentUserDep) -> ChatResp
         instruction=payload.steering_instruction,
         doc_count=len(payload.document_ids or []),
     )
+
+    if payload.document_ids:
+        # Check if any documents are still processing
+        result = await db.execute(
+            select(Document).where(Document.id.in_(payload.document_ids))
+        )
+        docs = result.scalars().all()
+        for doc in docs:
+            if doc.status in ["QUEUED", "PROCESSING", "CHUNKING", "EMBEDDING", "INDEXING"]:
+                logger.warning(f"Document {doc.id} is still {doc.status}, rejecting steer request.")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Cannot resume: Document '{doc.filename}' is still being ingested (Status: {doc.status})."
+                )
 
     try:
         updated_state = await steer_workflow(

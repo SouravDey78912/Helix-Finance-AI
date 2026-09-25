@@ -63,15 +63,21 @@ class RAGPipeline:
             await status_callback("EXTRACTING_ENTITIES", len(chunks))
 
         total_entities_extracted = 0
-        for chunk in chunks:
+        import asyncio
+        sem = asyncio.Semaphore(10)
+        
+        async def process_chunk(chunk):
             chunk.metadata.update(extracted_meta)
             chunk.metadata["filename"] = metadata.get("filename", "")
             chunk.metadata["document_id"] = document_id
-            
-            # Extract structured requirements / controls / risks from chunk
-            entities = await extract_entities_from_chunk(chunk.text, chunk.metadata)
+            async with sem:
+                entities = await extract_entities_from_chunk(chunk.text, chunk.metadata)
             chunk.metadata["entities"] = entities
-            total_entities_extracted += len(entities)
+            return len(entities)
+            
+        tasks = [process_chunk(chunk) for chunk in chunks]
+        results = await asyncio.gather(*tasks)
+        total_entities_extracted = sum(results)
 
         # 6. Embed
         if status_callback:

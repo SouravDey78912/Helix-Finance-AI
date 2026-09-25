@@ -87,7 +87,7 @@ async def extract_entities_from_chunk(text: str, doc_metadata: dict | None = Non
                 },
             ],
             "response_format": ChunkEntityExtractionResult,
-            "timeout": 10,
+            "timeout": 120,
         }
         if settings.litellm_base_url:
             kwargs["api_base"] = settings.litellm_base_url
