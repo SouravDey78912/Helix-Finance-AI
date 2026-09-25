@@ -28,13 +28,12 @@ async def clean_text(raw_text: str) -> str:
     # 1. Normalize unicode (NFKC)
     cleaned = unicodedata.normalize("NFKC", raw_text)
     
-    # 2. Replace multiple consecutive newlines or whitespaces with single ones
-    # Keep newlines but collapse spacing
+    # 2. Strip spaces around individual lines & collapse whitespace
+    lines = [line.strip() for line in cleaned.splitlines()]
+    cleaned = "\n".join(lines)
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
     cleaned = re.sub(r"\n\s*\n+", "\n\n", cleaned)
     
     # 3. Strip leading/trailing whitespaces
-    cleaned = cleaned.strip()
-    
-    return cleaned
+    return cleaned.strip()
 

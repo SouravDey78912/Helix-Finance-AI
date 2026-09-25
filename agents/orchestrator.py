@@ -183,32 +183,9 @@ async def analysis_node(state: SingleAgentState) -> Dict[str, Any]:
             entities.extend(chunk_meta["entities"])
 
     if not entities and state.get("retrieved_context"):
-        entities = [
-            {   
-                "entity_id": "REQ-01",
-                "entity_type": "Requirement",
-                "title": "Customer Due Diligence (CDD) Identification",
-                "obligation_level": "MANDATORY",
-            },
-            {
-                "entity_id": "REQ-02",
-                "entity_type": "Requirement",
-                "title": "Beneficial Ownership Verification (>25% stake)",
-                "obligation_level": "MANDATORY",
-            },
-            {
-                "entity_id": "CTRL-01",
-                "entity_type": "Control",
-                "title": "Automated Identity & Biometric Verification",
-                "status": "ACTIVE",
-            },
-            {
-                "entity_id": "EVID-01",
-                "entity_type": "Evidence",
-                "title": "Passport API Verification Log",
-                "status": "ACTIVE",
-            },
-        ]
+        from rag.ingest.entity_extractor import extract_entities_from_chunk
+        ctx_text = state.get("retrieved_context", "")[:2000]
+        entities = await extract_entities_from_chunk(ctx_text)
 
     gap_result = run_compliance_gap_analysis(entities)
 
@@ -238,11 +215,19 @@ async def evidence_verifier_node(state: SingleAgentState) -> Dict[str, Any]:
 
     for gap in gaps:
         if gap.get("severity") in ("HIGH", "CRITICAL") or gap.get("evidence_status") in ("MISSING", "OUTDATED"):
-            req_title = gap.get("requirement_title", "Mandatory Control Execution")
+            req_title = gap.get("requirement_title") or gap.get("requirement_code") or "Mandatory Control Execution"
+            control_id = gap.get("control_id") or "CTRL-UNVERIFIED"
+            control_name = gap.get("control_title") or gap.get("control_name") or "Internal Operational Control"
+            req_code = gap.get("requirement_code") or gap.get("requirement_id") or "COMPLIANCE-OBLIGATION"
+            reason_text = gap.get("summary") or f"Could not verify whether control '{control_name}' is currently operating effectively."
+
             evidence_requests.append({
                 "request_id": f"ev-{uuid.uuid4().hex[:6]}",
+                "control_id": control_id,
+                "control_name": control_name,
+                "requirement_code": req_code,
                 "title": f"Missing Operational Evidence for: {req_title}",
-                "reason": f"Could not verify whether control '{gap.get('control_title')}' is currently operating effectively.",
+                "reason": reason_text,
                 "severity": gap.get("severity", "MEDIUM"),
                 "suggested_evidence": [
                     "Recent onboarding / compliance audit report",
@@ -254,14 +239,23 @@ async def evidence_verifier_node(state: SingleAgentState) -> Dict[str, Any]:
     steps = list(state.get("steps", []))
     if len(steps) >= 4:
         steps[3]["status"] = "completed"
-        if evidence_requests:
-            steps[3]["detail"] = f"Identified {len(evidence_requests)} evidence points across retrieved context."
+        if len(evidence_requests) > 0:
+            missing_ids = ", ".join([r.get("control_id", "CTRL") for r in evidence_requests[:2]])
+            steps[3]["detail"] = f"Identified missing evidence boundary items for {len(evidence_requests)} controls ({missing_ids}). Generated Generative UI evidence request form."
         else:
-            steps[3]["detail"] = "Sufficient operational evidence verified across retrieved context."
+            steps[3]["detail"] = "Operational evidence validated across all mapped compliance requirements."
 
-    # Only pause workflow for evidence interrupt if CRITICAL evidence boundaries exist or explicit interrupt flag is set
-    has_critical_interrupt = any(g.get("severity") == "CRITICAL" or g.get("requires_interrupt") for g in gaps)
-    if has_critical_interrupt and not state.get("user_steering_instruction") and not state.get("new_document_ids"):
+    # Check if newly uploaded evidence or steering instruction actually resolved the missing evidence
+    has_steering = bool(state.get("user_steering_instruction") or state.get("new_document_ids"))
+    ctx_text = (state.get("retrieved_context") or "").lower()
+    has_valid_evidence_in_ctx = any(k in ctx_text for k in ["audit", "evidence", "log", "verification", "passport", "biometric", "approved", "pass"])
+
+    if has_steering and not has_valid_evidence_in_ctx and evidence_requests:
+        # Uploaded document did not contain required evidence
+        for req in evidence_requests:
+            req["reason"] = f"Uploaded evidence document was analyzed, but did NOT contain required execution evidence for '{req.get('title')}'."
+        inv_status = "WAITING_FOR_EVIDENCE"
+    elif len(evidence_requests) > 0 and not has_steering:
         inv_status = "WAITING_FOR_EVIDENCE"
     else:
         inv_status = "INVESTIGATING"
@@ -316,7 +310,7 @@ async def verification_node(state: SingleAgentState) -> Dict[str, Any]:
     steps = list(state.get("steps", []))
     if len(steps) >= 5:
         steps[4]["status"] = "completed"
-        steps[4]["detail"] = f"Assessed overall risk level: {overall_risk}. Human approval required."
+        steps[4]["detail"] = f"Calculated risk score [{overall_risk}]. Found {high_gaps} High-Severity, {med_gaps} Medium-Severity gaps. Human approval gate initialized."
 
     return {
         "risk_assessment": risk_assessment,

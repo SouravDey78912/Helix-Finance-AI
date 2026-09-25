@@ -59,6 +59,10 @@ class ChatResponse(BaseModel):
         default_factory=list,
         description="AG-UI Protocol standard event payload sequence (ag-ui.com specification)",
     )
+    generative_ui: dict[str, Any] | None = Field(
+        default=None,
+        description="Generative UI specification payload for dynamic frontend rendering",
+    )
     guardrails_triggered: bool = False
     latency_ms: float | None = None
 

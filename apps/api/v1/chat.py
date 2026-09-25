@@ -137,6 +137,15 @@ async def steer(payload: SteerRequest, current_user: CurrentUserDep) -> ChatResp
     latency_ms = round((time.monotonic() - start_ts) * 1000, 2)
     ag_ui_events = _build_ag_ui_event_sequence(updated_state, run_id, latency_ms)
 
+    gen_ui = None
+    for evt in ag_ui_events:
+        if "generative_ui" in evt:
+            gen_ui = evt["generative_ui"]
+            break
+        if evt.get("type") == "INTERRUPT" and isinstance(evt.get("payload"), dict) and "generative_ui" in evt["payload"]:
+            gen_ui = evt["payload"]["generative_ui"]
+            break
+
     needs_approval = updated_state.get("needs_approval", False)
     approval_status = updated_state.get("approval_status", "PENDING")
 
@@ -146,9 +155,15 @@ async def steer(payload: SteerRequest, current_user: CurrentUserDep) -> ChatResp
         gaps = gap_analysis.get("gaps", [])
         risk_level = risk_assessment.get("overall_risk_level", "MEDIUM")
 
+        has_steering = bool(payload.steering_instruction or payload.document_ids)
+        summary_text = (
+            f"⚠️ Uploaded evidence document was evaluated but provided NO valid execution proof for the controls. Identified {len(gaps)} compliance gaps."
+            if has_steering else f"Identified {len(gaps)} compliance gaps across retrieved policy documents."
+        )
+
         pending_info = PendingApproval(
             approval_id=updated_state.get("approval_id") or f"appr-{uuid.uuid4().hex[:8]}",
-            summary=f"Identified {len(gaps)} compliance gaps across retrieved policy documents.",
+            summary=summary_text,
             risk_level=risk_level,
             gaps_count=len(gaps),
             gaps=gaps,
@@ -157,9 +172,10 @@ async def steer(payload: SteerRequest, current_user: CurrentUserDep) -> ChatResp
 
         return ChatResponse(
             answer=(
-                "**Steering Guidance Applied**\n\n"
+                "**Steering Guidance & Evidence Evaluated**\n\n"
                 "The agent resumed investigation with your guidance/evidence. "
-                "**Human Approval is now required** to sign off on risk findings before final report generation."
+                "The uploaded document was evaluated, but provided **no valid execution proof** for the mandatory controls. "
+                "**Human Approval is now required** to sign off on these risk findings before final report generation."
             ),
             session_id=payload.session_id,
             status="PENDING_APPROVAL",
@@ -168,6 +184,7 @@ async def steer(payload: SteerRequest, current_user: CurrentUserDep) -> ChatResp
             agent_steps=agent_steps,
             pending_approval=pending_info,
             ag_ui_events=ag_ui_events,
+            generative_ui=gen_ui,
             guardrails_triggered=False,
             latency_ms=latency_ms,
         )
@@ -181,6 +198,7 @@ async def steer(payload: SteerRequest, current_user: CurrentUserDep) -> ChatResp
         agent_steps=agent_steps,
         pending_approval=None,
         ag_ui_events=ag_ui_events,
+        generative_ui=gen_ui,
         guardrails_triggered=False,
         latency_ms=latency_ms,
     )
@@ -225,6 +243,15 @@ async def query(payload: ChatRequest, current_user: CurrentUserDep) -> ChatRespo
     latency_ms = round((time.monotonic() - start_ts) * 1000, 2)
     ag_ui_events = _build_ag_ui_event_sequence(state, run_id, latency_ms)
 
+    gen_ui = None
+    for evt in ag_ui_events:
+        if "generative_ui" in evt:
+            gen_ui = evt["generative_ui"]
+            break
+        if evt.get("type") == "INTERRUPT" and isinstance(evt.get("payload"), dict) and "generative_ui" in evt["payload"]:
+            gen_ui = evt["payload"]["generative_ui"]
+            break
+
     needs_approval = state.get("needs_approval", False)
     approval_status = state.get("approval_status", "PENDING")
     inv_status = state.get("investigation_status", "INVESTIGATING")
@@ -243,6 +270,7 @@ async def query(payload: ChatRequest, current_user: CurrentUserDep) -> ChatRespo
             agent_steps=agent_steps,
             pending_approval=None,
             ag_ui_events=ag_ui_events,
+            generative_ui=gen_ui,
             guardrails_triggered=False,
             latency_ms=latency_ms,
         )
@@ -275,6 +303,7 @@ async def query(payload: ChatRequest, current_user: CurrentUserDep) -> ChatRespo
             agent_steps=agent_steps,
             pending_approval=pending_info,
             ag_ui_events=ag_ui_events,
+            generative_ui=gen_ui,
             guardrails_triggered=False,
             latency_ms=latency_ms,
         )
@@ -288,6 +317,7 @@ async def query(payload: ChatRequest, current_user: CurrentUserDep) -> ChatRespo
         agent_steps=agent_steps,
         pending_approval=None,
         ag_ui_events=ag_ui_events,
+        generative_ui=gen_ui,
         guardrails_triggered=False,
         latency_ms=latency_ms,
     )

@@ -122,11 +122,27 @@ def build_ag_ui_protocol_event_sequence(
 
     # 3. Information Boundary / Evidence Request Interrupt
     if investigation_status == "WAITING_FOR_EVIDENCE" and evidence_requests:
+        from agents.generative_ui import build_evidence_request_ui
+
+        req = evidence_requests[0] if evidence_requests else {}
+        control_id = req.get("control_id") or "CTRL-UNVERIFIED"
+        control_name = req.get("control_name") or "Operational Control"
+        req_code = req.get("requirement_code") or "COMPLIANCE-OBLIGATION"
+        reason_text = req.get("reason") or f"Found operational control '{control_name}' linked to {req_code}, but execution evidence is missing."
+
+        gen_ui = build_evidence_request_ui(
+            control_id=control_id,
+            control_name=control_name,
+            requirement_code=req_code,
+            description=reason_text,
+        )
+
         int_id = f"evint-{uuid.uuid4().hex[:8]}"
         payload_data = {
             "interrupt_type": "EVIDENCE_REQUEST",
             "message": "The agent encountered an information boundary. Supporting operational evidence is required.",
             "evidence_requests": evidence_requests,
+            "generative_ui": gen_ui,
             "suggested_actions": [
                 {"action_id": "UPLOAD_EVIDENCE", "label": "📎 Upload Supporting Document"},
                 {"action_id": "PROVIDE_DIRECTION", "label": "💬 Tell Agent Where To Look"},
@@ -147,19 +163,31 @@ def build_ag_ui_protocol_event_sequence(
             "interruptId": int_id,
             "reason": int_evt.reason,
             "payload": payload_data,
+            "generative_ui": gen_ui,
         })
 
     # 4. Human Approval Interrupt if pending
     elif needs_approval and approval_status == "PENDING":
+        from agents.generative_ui import build_approval_card_ui
+
         gaps = (gap_analysis or {}).get("gaps", [])
         risk_level = (risk_assessment or {}).get("overall_risk_level", "MEDIUM")
         int_id = approval_id or f"appr-{uuid.uuid4().hex[:8]}"
+
+        summary_text = f"Identified {len(gaps)} compliance gaps across retrieved policy documents."
+        gen_ui = build_approval_card_ui(
+            approval_id=int_id,
+            summary=summary_text,
+            risk_level=risk_level,
+            gaps=gaps,
+        )
 
         payload_data = {
             "interrupt_type": "HUMAN_APPROVAL",
             "risk_level": risk_level,
             "gaps_count": len(gaps),
             "gaps": gaps,
+            "generative_ui": gen_ui,
             "actions": [
                 {"action_id": "APPROVED", "label": "Approve & Synthesize Report"},
                 {"action_id": "REVISED", "label": "Request Revision"},
@@ -180,6 +208,7 @@ def build_ag_ui_protocol_event_sequence(
             "interruptId": int_id,
             "reason": int_evt.reason,
             "payload": payload_data,
+            "generative_ui": gen_ui,
         })
 
     elif final_answer:

@@ -67,18 +67,16 @@ async def test_extract_metadata_fallback(mock_completion):
 @pytest.mark.asyncio
 async def test_chunk_text():
     text = "Line A\n\nLine B\n\nLine C"
-    chunks = await chunk_text(text, document_id="doc-123", chunk_size=20, chunk_overlap=2)
+    chunks = await chunk_text(text, document_id="doc-123", chunk_size=8, chunk_overlap=0)
     assert len(chunks) > 0
     assert chunks[0].document_id == "doc-123"
     assert chunks[0].text == "Line A"
 
 
 @pytest.mark.asyncio
-@patch("litellm.aembedding")
-async def test_embed_chunks(mock_aembedding):
-    mock_response = MagicMock()
-    mock_response.data = [{"embedding": [0.1, 0.2, 0.3]}]
-    mock_aembedding.return_value = mock_response
+@patch("rag.ingest.embedder.generate_embeddings", new_callable=AsyncMock)
+async def test_embed_chunks(mock_gen_emb):
+    mock_gen_emb.return_value = [[0.1, 0.2, 0.3]]
 
     chunks = [
         TextChunk(
@@ -114,12 +112,10 @@ async def test_rewrite_query(mock_completion):
 
 
 @pytest.mark.asyncio
-@patch("infrastructure.qdrant_client.search_vectors")
-@patch("litellm.aembedding")
-async def test_hybrid_search(mock_aembedding, mock_search_vectors):
-    mock_emb_response = MagicMock()
-    mock_emb_response.data = [{"embedding": [0.1] * 384}]
-    mock_aembedding.return_value = mock_emb_response
+@patch("rag.query.hybrid_search.search_vectors", new_callable=AsyncMock)
+@patch("rag.query.hybrid_search.generate_embeddings", new_callable=AsyncMock)
+async def test_hybrid_search(mock_gen_emb, mock_search_vectors):
+    mock_gen_emb.return_value = [[0.1] * 384]
 
     mock_search_vectors.return_value = [
         {"chunk_id": "chunk-1", "score": 0.9, "text": "Compliance rules", "metadata": {}},

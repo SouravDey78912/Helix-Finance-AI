@@ -580,9 +580,9 @@ async function sendMessage() {
                         </span>
                         <span style="font-weight:500;color:#64748b;" id="step-count-${listId}">· ${completedCount}/5 steps</span>
                     </div>
-                    <span class="timeline-toggle-icon" id="toggle-${listId}">▾ Details</span>
+                    <span class="timeline-toggle-icon" id="toggle-${listId}">▴ Hide</span>
                 </div>
-                <div class="timeline-step-list collapsed" id="${listId}">
+                <div class="timeline-step-list" id="${listId}">
                     ${items}
                 </div>
             </div>`;
@@ -655,9 +655,11 @@ async function sendMessage() {
         const prefixEl = msgDiv.querySelector('.prefix-container');
         if (prefixEl) prefixEl.innerHTML = finalTimelineHtml;
 
-        // 3. Build Evidence Request Interrupt Card or Human Approval Card
+        // 3. Build Generative UI Component Registry Card or Interrupt Card
         let interruptMarkup = '';
-        if (data.status === 'WAITING_FOR_EVIDENCE' || (data.ag_ui_events && data.ag_ui_events.some(e => e.payload && e.payload.interrupt_type === 'EVIDENCE_REQUEST'))) {
+        if (data.generative_ui) {
+            interruptMarkup = renderGenerativeUI(data.generative_ui, chatSessionId);
+        } else if (data.status === 'WAITING_FOR_EVIDENCE' || (data.ag_ui_events && data.ag_ui_events.some(e => e.payload && e.payload.interrupt_type === 'EVIDENCE_REQUEST'))) {
             const evEvt = (data.ag_ui_events || []).find(e => e.payload && e.payload.interrupt_type === 'EVIDENCE_REQUEST');
             const reqs = (evEvt?.payload?.evidence_requests || []);
             const reqsList = reqs.map(r => `
@@ -785,7 +787,7 @@ async function sendMessage() {
         const replyText = data.answer || data.response || 'No content returned.';
         
         let i = 0;
-        const chunkSize = 5;
+        const chunkSize = 25;
         const typeTimer = setInterval(() => {
             if (i < replyText.length) {
                 i += chunkSize;
@@ -866,10 +868,20 @@ function streamMessageContent(sender, prefixHtml, bodyText, suffixHtml) {
 
 
 async function submitApproval(sessionId, approvalId, decision) {
-    const feedbackInput = document.getElementById(`feedback-${approvalId}`);
+    let feedbackInput = document.getElementById(`feedback-${approvalId}`) || document.getElementById(`feedback-${sessionId}`);
     const feedback = feedbackInput ? feedbackInput.value.trim() : '';
 
-    const card = document.getElementById(`approval-card-${approvalId}`);
+    let card = document.getElementById(`approval-card-${approvalId}`) ||
+               document.getElementById(`appr-card-${approvalId}`) ||
+               document.getElementById(approvalId);
+
+    if (!card) {
+        const allCards = document.querySelectorAll('.human-approval-card');
+        if (allCards.length > 0) {
+            card = allCards[allCards.length - 1];
+        }
+    }
+
     const msgBubble = card ? card.closest('.message-bubble') : null;
     const bodyEl = msgBubble ? msgBubble.querySelector('.body-text-container') : null;
 
@@ -892,16 +904,16 @@ async function submitApproval(sessionId, approvalId, decision) {
         }
     }
 
-    // 2. Immediately convert Approval Card to success state on click
+    // 2. Immediately convert Approval Card to confirmed state on click (hides buttons)
     if (card) {
         card.style.opacity = '1';
         card.style.pointerEvents = 'none';
-        card.style.borderColor = '#bbf7d0';
-        card.style.background = '#f0fdf4';
+        card.style.borderColor = decision === 'APPROVED' ? '#bbf7d0' : '#fde68a';
+        card.style.background = decision === 'APPROVED' ? '#f0fdf4' : '#fffbeb';
         card.innerHTML = `
-            <div style="display:inline-flex;align-items:center;gap:6px;font-weight:700;color:#15803d;padding:0.2rem 0;">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
-                Human Approval Recorded: <strong>${decision}</strong>
+            <div style="display:inline-flex;align-items:center;gap:6px;font-weight:700;color:${decision === 'APPROVED' ? '#15803d' : '#b45309'};padding:0.4rem 0.6rem;font-size:0.85rem;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                <span>HUMAN SIGN-OFF RECORDED: <strong style="letter-spacing:0.04em;">${decision}</strong></span>
                 ${feedback ? `<span style="font-weight:400;color:#475569;margin-left:0.5rem;">— Feedback: "${escapeHtml(feedback)}"</span>` : ''}
             </div>`;
     }
@@ -942,7 +954,7 @@ async function submitApproval(sessionId, approvalId, decision) {
         // 4. Typewriter stream final synthesized audit report live into body container
         if (bodyEl) {
             let i = 0;
-            const chunkSize = 6;
+            const chunkSize = 25;
             const typeTimer = setInterval(() => {
                 if (i < finalAnswerText.length) {
                     i += chunkSize;
@@ -991,7 +1003,7 @@ function toggleSourceDrawer(drawerId) {
     }
 }
 
-async function submitSteer(sessionId, defaultInstruction = null) {
+async function submitSteer(sessionId, defaultInstruction = null, docIds = null) {
     const inputEl = document.getElementById(`steer-input-${sessionId}`);
     const instruction = defaultInstruction || (inputEl ? inputEl.value.trim() : '');
 
@@ -1036,6 +1048,7 @@ async function submitSteer(sessionId, defaultInstruction = null) {
             body: JSON.stringify({
                 session_id: sessionId,
                 steering_instruction: instruction,
+                document_ids: docIds || null,
             })
         });
 
@@ -1299,4 +1312,200 @@ function scrollChatToBottom() {
 function escapeHtml(str) {
     if (!str) return '';
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── Helix Generative UI Component Registry & Renderer ─────────────────────
+function renderGenerativeUI(genUI, sessionId) {
+    if (!genUI || !genUI.components) return '';
+    return genUI.components.map(comp => renderGenUIComponent(comp, sessionId)).join('');
+}
+
+function renderGenUIComponent(comp, sessionId) {
+    const props = comp.props || {};
+    const actions = comp.actions || [];
+
+    switch (comp.type) {
+        case 'EvidenceRequest':
+            return `
+                <div class="gen-ui-card evidence-request-card" id="${escapeHtml(comp.id)}">
+                    <div class="gen-ui-header amber">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        ${escapeHtml(comp.title || 'Additional Evidence Required')}
+                    </div>
+                    <div class="gen-ui-body">
+                        <p>${escapeHtml(comp.description || '')}</p>
+                        <div class="gen-ui-props-badge">
+                            <span>Control: <strong>${escapeHtml(props.control_id || 'CTRL-41')}</strong></span>
+                            <span>Requirement: <strong>${escapeHtml(props.requirement_code || 'CDD-102')}</strong></span>
+                        </div>
+                    </div>
+                </div>`;
+
+        case 'DocumentUpload':
+            return `
+                <div class="gen-ui-card upload-card" id="${escapeHtml(comp.id)}">
+                    <div class="gen-ui-title">${escapeHtml(comp.title || 'Upload Audit Evidence')}</div>
+                    <div class="gen-ui-dropzone" id="gen-dropzone-${sessionId}" onclick="document.getElementById('gen-file-input-${sessionId}').click()">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        <span>${escapeHtml(props.placeholder || '📎 Upload evidence document (.pdf, .docx, .txt)')}</span>
+                        <input type="file" id="gen-file-input-${sessionId}" class="hidden" onchange="handleGenUIFileUpload(this, '${sessionId}')" />
+                    </div>
+                </div>`;
+
+        case 'InvestigationScope':
+            const optionsHtml = (props.options || []).map(opt => `
+                <label class="scope-option-label">
+                    <input type="radio" name="scope-${sessionId}" value="${escapeHtml(opt.value)}" ${opt.value === props.default_value ? 'checked' : ''} />
+                    <span>${escapeHtml(opt.label)}</span>
+                </label>`).join('');
+
+            return `
+                <div class="gen-ui-card scope-card" id="${escapeHtml(comp.id)}">
+                    <div class="gen-ui-title">${escapeHtml(comp.title || 'Where should the agent investigate?')}</div>
+                    <div class="scope-options-grid">${optionsHtml}</div>
+                </div>`;
+
+        case 'InvestigationControls':
+            const btnsHtml = actions.map(act => `
+                <button class="btn ${act.variant === 'primary' ? 'btn-primary' : 'btn-secondary'}" onclick="handleGenUIAction('${sessionId}', '${act.action_id}')">
+                    ${escapeHtml(act.label)}
+                </button>`).join('');
+
+            return `
+                <div class="gen-ui-card controls-card" id="${escapeHtml(comp.id)}">
+                    <div class="gen-ui-actions-row">${btnsHtml}</div>
+                </div>`;
+
+        case 'ComplianceFinding':
+            return `
+                <div class="gen-ui-card finding-card" id="${escapeHtml(comp.id)}">
+                    <div class="gen-ui-header ${props.risk_level === 'HIGH' ? 'danger' : 'amber'}">
+                        <span>${escapeHtml(comp.title)}</span>
+                        <span class="badge ${props.risk_level === 'HIGH' ? 'badge-danger' : 'badge-amber'}">${escapeHtml(props.risk_level)} RISK</span>
+                    </div>
+                    <div class="gen-ui-body">
+                        <div class="finding-meta">Requirement: <strong>${escapeHtml(props.requirement_code)}</strong> | Control: <strong>${escapeHtml(props.control_id)}</strong></div>
+                        <div class="finding-snippet">"${escapeHtml(props.evidence_snippet)}"</div>
+                    </div>
+                    <div class="gen-ui-actions-row">
+                        ${actions.map(act => `<button class="btn btn-sm ${act.variant === 'success' ? 'btn-primary' : 'btn-secondary'}" onclick="handleGenUIAction('${sessionId}', '${act.action_id}')">${escapeHtml(act.label)}</button>`).join('')}
+                    </div>
+                </div>`;
+
+        case 'ApprovalCard':
+            return `
+                <div class="human-approval-card" id="${escapeHtml(comp.id)}">
+                    <div class="approval-card-header">
+                        <div class="approval-card-title">
+                            <span style="font-weight:700;color:#991b1b;">${escapeHtml(comp.title || 'HUMAN APPROVAL REQUIRED')}</span>
+                        </div>
+                        <span class="gap-badge ${props.risk_level === 'HIGH' ? 'gap-badge-high' : 'gap-badge-medium'}">${escapeHtml(props.risk_level || 'MEDIUM')} RISK</span>
+                    </div>
+                    <div class="approval-card-body">
+                        <div>${escapeHtml(comp.description || '')}</div>
+                        ${(props.gaps || []).map(g => `<div class="approval-gap-entry"><strong>[${escapeHtml(g.severity)}] ${escapeHtml(g.requirement_title || 'Obligation')}</strong> — Control: ${escapeHtml(g.control_title)}</div>`).join('')}
+                    </div>
+                    <input type="text" id="feedback-${sessionId}" class="approval-feedback-input" placeholder="Optional compliance officer feedback or instructions..." />
+                    <div class="approval-actions-row">
+                        <button class="btn-approve" onclick="submitApproval('${sessionId}', '${props.approval_id}', 'APPROVED')">✓ Approve & Synthesize Report</button>
+                        <button class="btn-revise" onclick="submitApproval('${sessionId}', '${props.approval_id}', 'REVISED')">💬 Request Revision</button>
+                        <button class="btn-reject" onclick="submitApproval('${sessionId}', '${props.approval_id}', 'REJECTED')">✕ Reject Findings</button>
+                    </div>
+                </div>`;
+
+        default:
+            return '';
+    }
+}
+
+async function handleGenUIAction(sessionId, actionId) {
+    const selectedScopeEl = document.querySelector(`input[name="scope-${sessionId}"]:checked`);
+    const selectedScope = selectedScopeEl ? selectedScopeEl.value : 'aml_onboarding';
+
+    const uploadInfo = (window._genUIUploads && window._genUIUploads[sessionId]) ? window._genUIUploads[sessionId] : null;
+    const docIds = uploadInfo ? [uploadInfo.docId] : null;
+
+    // Immediately disable/lock all Generative UI cards for this session
+    const cards = document.querySelectorAll(`.gen-ui-card`);
+    cards.forEach(card => {
+        card.style.pointerEvents = 'none';
+        card.style.opacity = '0.65';
+        card.querySelectorAll('input, button, select, label').forEach(el => el.disabled = true);
+    });
+
+    const dropzoneEl = document.getElementById(`gen-dropzone-${sessionId}`);
+    if (dropzoneEl) {
+        dropzoneEl.onclick = null;
+        dropzoneEl.style.cursor = 'not-allowed';
+    }
+
+    const controlsCard = document.querySelector(`.controls-card`);
+    if (controlsCard) {
+        controlsCard.style.opacity = '1';
+        controlsCard.style.pointerEvents = 'auto';
+        controlsCard.innerHTML = `
+            <div style="padding:10px 14px; background:#ecfdf5; border:1px solid #10b981; border-radius:6px; color:#047857; font-weight:600; font-size:0.85rem; display:flex; align-items:center; gap:8px;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                <span>Form Closed & Locked · Investigation resumed with scope [<strong>${escapeHtml(selectedScope)}</strong>] ${uploadInfo ? 'and evidence document [<strong>' + escapeHtml(uploadInfo.filename) + '</strong>]' : ''}</span>
+            </div>`;
+    }
+
+    if (actionId === 'STEER_INVESTIGATION') {
+        let instruction = `Focus investigation on scope: ${selectedScope}`;
+        if (uploadInfo) {
+            instruction += ` (Attached evidence document: ${uploadInfo.filename})`;
+        }
+        await submitSteer(sessionId, instruction, docIds);
+    } else if (actionId === 'CONTINUE_WITHOUT_EVIDENCE') {
+        await submitSteer(sessionId, 'Continue as is without operational evidence');
+    }
+}
+
+async function handleGenUIFileUpload(inputEl, sessionId) {
+    if (!inputEl.files || inputEl.files.length === 0) return;
+    const file = inputEl.files[0];
+
+    const dropzoneEl = document.getElementById(`gen-dropzone-${sessionId}`);
+    if (dropzoneEl) {
+        dropzoneEl.innerHTML = `
+            <svg class="spinner-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="10"/></svg>
+            <span>Uploading & ingesting evidence document '${escapeHtml(file.name)}'...</span>`;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const res = await fetch('/api/v1/documents/upload', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: formData
+        });
+        if (res.ok) {
+            const docData = await res.json();
+            window._genUIUploads = window._genUIUploads || {};
+            window._genUIUploads[sessionId] = {
+                docId: docData.document_id,
+                filename: file.name
+            };
+
+            if (dropzoneEl) {
+                dropzoneEl.style.borderColor = '#10b981';
+                dropzoneEl.style.background = '#ecfdf5';
+                dropzoneEl.innerHTML = `
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                    <span style="color:#047857;font-weight:700;">✓ Attached Evidence Document: ${escapeHtml(file.name)}</span>
+                    <span style="font-size:0.75rem;color:#059669;">Ready. Select investigation scope and click 'Continue Investigation' below.</span>`;
+            }
+        } else {
+            if (dropzoneEl) {
+                dropzoneEl.innerHTML = `<span style="color:#ef4444;">⚠️ Upload failed. Please try again.</span>`;
+            }
+        }
+    } catch (err) {
+        console.error('Error uploading Generative UI evidence file:', err);
+        if (dropzoneEl) {
+            dropzoneEl.innerHTML = `<span style="color:#ef4444;">⚠️ Upload error. Please try again.</span>`;
+        }
+    }
 }
