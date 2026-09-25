@@ -153,9 +153,16 @@ Retrieves context for natural language questions:
    - Computes tokens using `tiktoken` (falling back to character estimation if not present) to respect a strict context window token budget (default 3000).
    - Generates structured citations showing file references, chunk indices, and compliance entities.
 
+### Model Evaluation & Governance Sub-System
+Automated LLM-as-a-judge evaluation suite (`evaluation/ragas_eval.py`, `evaluation/deepeval_eval.py`):
 
-
----
+1. **API Integration (`apps/api/v1/evaluation.py`)**:
+   - `POST /api/v1/evaluation/run`: Triggers live evaluation of Faithfulness, Answer Relevancy, Context Precision, Hallucination index, and FinTech Compliance G-Eval scores.
+   - `GET /api/v1/evaluation/results`: Retrieves cached or stored benchmark metrics.
+2. **Prometheus Telemetry (`observability/metrics.py`)**:
+   - Updates Prometheus gauge metrics (`helix_eval_faithfulness_score`, `helix_eval_answer_relevancy_score`, `helix_eval_context_precision_score`, `helix_eval_hallucination_score`, `helix_eval_compliance_score`).
+3. **Grafana Dashboards**:
+   - Provisioned automatically via Docker Compose volume mounts (`infrastructure/docker/docker-compose.yml`) from `./grafana/provisioning/`.
 
 ## Async Worker Architecture
 

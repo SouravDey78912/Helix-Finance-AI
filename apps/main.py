@@ -106,8 +106,12 @@ def create_app() -> FastAPI:
 
     # ── Prometheus metrics endpoint ───────────────────────────────────────
     if settings.prometheus_enabled:
-        metrics_app = make_asgi_app()
-        app.mount(settings.metrics_path, metrics_app)
+        from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+        from fastapi import Response
+
+        @app.get("/metrics", include_in_schema=False)
+        def prometheus_metrics():
+            return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     # ── Global exception handler ──────────────────────────────────────────
     @app.exception_handler(NotImplementedError)

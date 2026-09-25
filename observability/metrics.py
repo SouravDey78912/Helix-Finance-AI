@@ -87,3 +87,29 @@ guardrails_triggered_total = Counter(
     "Total guardrail triggers",
     ["trigger_type"],  # pii | hallucination | toxicity | compliance
 )
+
+# ── RAG & Agent Evaluation Metrics (Ragas / DeepEval) ───────────────────────
+eval_faithfulness_gauge = Gauge(
+    "helix_eval_faithfulness_score",
+    "Ragas Faithfulness Score (0.0 to 1.0)",
+)
+
+eval_answer_relevancy_gauge = Gauge(
+    "helix_eval_answer_relevancy_score",
+    "Ragas Answer Relevancy Score (0.0 to 1.0)",
+)
+
+eval_context_precision_gauge = Gauge(
+    "helix_eval_context_precision_score",
+    "Ragas Context Precision Score (0.0 to 1.0)",
+)
+
+eval_hallucination_gauge = Gauge(
+    "helix_eval_hallucination_score",
+    "DeepEval Hallucination Score (0.0 to 1.0, lower is better)",
+)
+
+eval_compliance_score_gauge = Gauge(
+    "helix_eval_compliance_score",
+    "DeepEval FinTech Compliance Governance Score (0.0 to 1.0)",
+)

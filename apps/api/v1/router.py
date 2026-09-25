@@ -6,7 +6,7 @@ Aggregates all v1 API routers into a single include.
 
 from fastapi import APIRouter
 
-from apps.api.v1 import auth, chat, documents, aml, kyc, compliance, health
+from apps.api.v1 import auth, chat, documents, aml, kyc, compliance, health, evaluation
 
 v1_router = APIRouter()
 
@@ -17,3 +17,4 @@ v1_router.include_router(documents.router, prefix="/documents", tags=["Documents
 v1_router.include_router(aml.router, prefix="/aml", tags=["AML"])
 v1_router.include_router(kyc.router, prefix="/kyc", tags=["KYC"])
 v1_router.include_router(compliance.router, prefix="/compliance", tags=["Compliance"])
+v1_router.include_router(evaluation.router, prefix="/evaluation", tags=["Evaluation"])

@@ -42,7 +42,8 @@ Build with open source.
 - **Hybrid RAG Pipeline**: Reciprocal Rank Fusion (RRF) query rewriting, dense vector search (Qdrant), and cross-encoder reranking.
 - **Structured Entity & Requirement Extraction**: Automatic domain entity parsing (`Regulation`, `Requirement`, `Internal Control`, `Evidence`) during document ingestion using `rag/ingest/entity_extractor.py`.
 - **Compliance Gap Analysis Engine**: Graph-based compliance relationship builder (`rag/compliance_graph.py`) identifying unmapped requirements and missing evidence with automated severity scoring (`HIGH`, `MEDIUM`, `LOW`).
-- **Interactive Compliance Command Center**: Modern glassmorphism UI with real-time gap analysis cards, document manager, live query execution, and explicit PREVIEW state tags for target benchmark metrics.
+- **Active Ragas & DeepEval Governance Suite**: Real-time evaluation framework (`evaluation/ragas_eval.py`, `evaluation/deepeval_eval.py`, `apps/api/v1/evaluation.py`) computing Faithfulness, Answer Relevancy, Context Precision, Hallucination index, and G-Eval FinTech compliance scores. Exports live Prometheus metrics (`helix_eval_*`) with auto-provisioned Grafana dashboards.
+- **Interactive Compliance Command Center**: Modern glassmorphism UI with real-time gap analysis cards, document manager, live query execution, and on-demand model governance evaluation controls.
 
 ## Repository
 ```text

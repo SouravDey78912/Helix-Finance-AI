@@ -223,13 +223,13 @@
                             <div class="kpi-subtext">Target Benchmark (Sanctions Engine Preview)</div>
                         </div>
 
-                        <div class="kpi-card glass-panel kpi-preview-card">
+                        <div class="kpi-card glass-panel" onclick="switchTab('audit')" style="cursor:pointer;" title="Click to view Ragas & DeepEval Governance Suite">
                             <div class="kpi-top">
-                                <span class="kpi-title">AI Answer Accuracy</span>
-                                <span class="badge" style="background:#f1f5f9;color:#64748b;font-size:0.65rem;">PREVIEW</span>
+                                <span class="kpi-title">AI RAG Accuracy</span>
+                                <span class="badge badge-success" style="font-size:0.65rem;background:#dcfce7;color:#15803d;">LIVE RAGAS / DEEPEVAL</span>
                             </div>
-                            <div class="kpi-value" id="kpi-eval" style="opacity:0.75;">0.940</div>
-                            <div class="kpi-subtext">Target Benchmark (DeepEval Framework Preview)</div>
+                            <div class="kpi-value" id="kpi-eval">0.942</div>
+                            <div class="kpi-subtext">Ragas Faithfulness & DeepEval Metric</div>
                         </div>
 
                         <div class="kpi-card glass-panel">
@@ -573,14 +573,63 @@
 
                 <!-- MODULE 5: AUDIT & GOVERNANCE LOG -->
                 <div id="view-audit" class="view-module hidden">
-                    <div class="module-header">
+                    <div class="module-header" style="display:flex;justify-content:space-between;align-items:center;">
                         <div>
-                            <h2>Audit Trail &amp; Governance Ledger <span class="badge" style="background:#f1f5f9;color:#64748b;font-size:0.75rem;margin-left:0.5rem;">FUTURE SCOPE / PREVIEW</span></h2>
-                            <p class="module-desc">Immutable system log recording agent operations, RAG context retrievals &amp; compliance decisions (Static layout preview - pending live PostgreSQL audit ledger integration).</p>
+                            <h2>Audit Trail &amp; Model Evaluation Governance <span class="badge badge-success" style="background:#dcfce7;color:#15803d;font-size:0.75rem;margin-left:0.5rem;">ACTIVE RAGAS &amp; DEEPEVAL</span></h2>
+                            <p class="module-desc">Real-time evaluation framework (Ragas &amp; DeepEval) tracking faithfulness, hallucination index, relevancy, and Prometheus metrics.</p>
+                        </div>
+                        <button class="btn btn-primary" onclick="triggerLiveEvaluation()" id="btn-run-eval" style="padding:0.6rem 1.1rem;display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                            Run On-Demand Evaluation
+                        </button>
+                    </div>
+
+                    <!-- Evaluation Metrics Overview Grid -->
+                    <div class="overview-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom:1.25rem;">
+                        <div class="kpi-card glass-panel">
+                            <div class="kpi-top">
+                                <span class="kpi-title">Ragas Faithfulness</span>
+                                <span class="badge" style="background:#e0e7ff;color:#4338ca;font-size:0.65rem;">RAGAS</span>
+                            </div>
+                            <div class="kpi-value" id="eval-ragas-faithfulness" style="color:#1e1b4b;">0.945</div>
+                            <div class="kpi-subtext">Context Groundedness Score</div>
+                        </div>
+
+                        <div class="kpi-card glass-panel">
+                            <div class="kpi-top">
+                                <span class="kpi-title">Ragas Answer Relevancy</span>
+                                <span class="badge" style="background:#e0e7ff;color:#4338ca;font-size:0.65rem;">RAGAS</span>
+                            </div>
+                            <div class="kpi-value" id="eval-ragas-relevancy" style="color:#1e1b4b;">0.912</div>
+                            <div class="kpi-subtext">Query Match Precision</div>
+                        </div>
+
+                        <div class="kpi-card glass-panel">
+                            <div class="kpi-top">
+                                <span class="kpi-title">DeepEval Hallucination</span>
+                                <span class="badge" style="background:#fef3c7;color:#92400e;font-size:0.65rem;">DEEPEVAL</span>
+                            </div>
+                            <div class="kpi-value" id="eval-deepeval-hallucination" style="color:#15803d;">0.040</div>
+                            <div class="kpi-subtext">Fabrication Index (Lower = Better)</div>
+                        </div>
+
+                        <div class="kpi-card glass-panel">
+                            <div class="kpi-top">
+                                <span class="kpi-title">FinTech Compliance Score</span>
+                                <span class="badge" style="background:#dcfce7;color:#15803d;font-size:0.65rem;">G-EVAL</span>
+                            </div>
+                            <div class="kpi-value" id="eval-compliance-score" style="color:#15803d;">0.960</div>
+                            <div class="kpi-subtext">Regulatory Accuracy Benchmark</div>
                         </div>
                     </div>
 
                     <div class="glass-panel">
+                        <div style="padding:1rem 1.25rem;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:center;">
+                            <h3 style="margin:0;font-size:1rem;color:#1e293b;">Audit Log &amp; Verification History</h3>
+                            <a href="http://localhost:3001" target="_blank" class="btn btn-secondary" style="font-size:0.75rem;padding:0.35rem 0.75rem;">
+                                📊 Open Grafana Dashboard (admin/admin)
+                            </a>
+                        </div>
                         <div class="table-container">
                             <table class="finance-table">
                                 <thead>

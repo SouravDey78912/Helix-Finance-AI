@@ -112,10 +112,12 @@ helix-finance-ai/
 | GET | `/api/v1/documents` | List uploaded documents | ✅ Implemented |
 | GET | `/api/v1/documents/{id}` | Get document details | ✅ Implemented |
 | DELETE | `/api/v1/documents/{id}` | Delete document | ✅ Implemented |
+| POST | `/api/v1/evaluation/run` | Run on-demand Ragas & DeepEval evaluation suite | ✅ Implemented |
+| GET | `/api/v1/evaluation/results` | Fetch latest Ragas & DeepEval evaluation metrics | ✅ Implemented |
 | POST | `/api/v1/aml/analyze` | AML Risk Radar | 🔍 PREVIEW (Planned) |
 | POST | `/api/v1/kyc/verify` | KYC Verification | 🔍 PREVIEW (Planned) |
 | POST | `/api/v1/compliance/check` | Compliance Audit Ledger | 🔍 PREVIEW (Planned) |
-| GET | `/metrics` | Prometheus metrics | ✅ Implemented |
+| GET | `/metrics` | Prometheus metrics (includes Ragas/DeepEval gauges) | ✅ Implemented |
 
 
 ---
